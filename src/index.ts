@@ -21,4 +21,12 @@ export {
 export type { Credential, BearerCredential, HmacCredential } from './auth.js';
 export { gatherAgentCounts, bucketAgents } from './counts.js';
 export type { AgentCountsReport, CompanyAgentCount, ElevationModeBucket, GatherAgentCountsOptions } from './counts.js';
+export {
+  AutoElevateWriteClient,
+  AutoElevateValidationError,
+  validateApprovePayload,
+  validateDenyPayload,
+  DENIAL_REASON_MAX,
+} from './writeClient.js';
+export type { AutoElevateWriteClientConfig } from './writeClient.js';
 export type * from './model.js';

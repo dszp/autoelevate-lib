@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { AutoElevateReadClient, IncompleteListError } from './readClient.js';
 import { fakeComputer, mockFetch, pagedHandler, TEST_BEARER } from './testkit.js';
+import * as barrel from './index.js';
 
 function client(f: ReturnType<typeof mockFetch>) {
   return new AutoElevateReadClient({ credential: TEST_BEARER, fetchImpl: f.fetchImpl });
@@ -81,5 +82,10 @@ describe('AutoElevateReadClient', () => {
   it('has no write methods (approve/deny are deliberately absent)', () => {
     const names = Object.getOwnPropertyNames(AutoElevateReadClient.prototype);
     expect(names.some((n) => /approve|deny|create|update|delete|post/i.test(n))).toBe(false);
+  });
+
+  it('barrel exports the write client but not the transport', () => {
+    expect(typeof barrel.AutoElevateWriteClient).toBe('function');
+    expect((barrel as Record<string, unknown>).AutoElevateHttp).toBeUndefined();
   });
 });
