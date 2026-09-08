@@ -1,0 +1,3270 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AutoElevate Partner API (Beta)",
+    "version": "1.0.0",
+    "description": "The Partner API enables integration partners to programmatically access\nAutoElevate data for their managed customers — usage metrics, computer\ninventory, security events, and more.\n\n## Beta\n\nThis API is in **beta** and may change without notice. Every request\nmust include an explicit acknowledgment header:\n\n```\nX-Acknowledgment: i-understand-this-is-beta-and-may-change\n```\n\nRequests missing this header — or sending any other value — are\nrejected with **400 Bad Request**.\n\n## Versioning\n\nEvery endpoint is versioned in its URL path — `/api/v1/computers`,\n`/api/v2/computers`, and so on. Pin your integration to an explicit\nversion.\n\nThe **unversioned** path (`/api/computers`) is a permanent alias for\n**v1** — never the latest version — so publishing a new version can\nnever silently change the behavior of an existing integration. New\nversions are strictly opt-in: adopt one by changing the version segment\nin the URL.\n\nWhen a version is deprecated its responses carry a `Deprecation: true`\nheader and, once a removal date is committed, an RFC 8594 `Sunset`\nheader with that date; a `Link` header with `rel=\"successor-version\"`\npoints at the replacement. A version is only removed after a published\ndeprecation window — watch for these headers to migrate ahead of time.\n\n## Getting Started\n\n### 1. Create an API Key\n\nIn the AutoElevate admin portal, open a **service user** and add an\n**API Key**. Pick a scheme at creation time:\n\n- **API Token (AE-BEARER)** — recommended for most integrations. Works\n  with any HTTP client, iPaaS platform, SDK generator, or LLM tool.\n- **HMAC (AE-HMAC-SHA256)** — request-signed scheme. Signs\n  `scheme + METHOD + URL + bodyHash + ts`, so both the request\n  target and the body are tamper-protected, bounded by a 5-minute\n  replay window (see below for the exact signing steps).\n\nBearer keys show a single secret at creation. HMAC keys show **two**\nvalues — a wire `token` and a separate `hmacKey` signing key —\nboth displayed once and never retrievable again.\n\n### 2. Authenticate\n\n**Bearer (AE-BEARER)** — send the token directly:\n\n```bash\ncurl https://partner-api.autoelevate.com/api/usage \\\n  -H \"Authorization: Bearer aeb_xxxxxxxxxxxxxxxxxxxxxxxx\" \\\n  -H \"X-Acknowledgment: i-understand-this-is-beta-and-may-change\"\n```\n\n**HMAC (AE-HMAC-SHA256)** — request-signed scheme. Build the\n`Authorization` header yourself:\n\n1. Compute `bodyHash` — the SHA-256 hex digest of the exact request\n   body bytes. For a request with no body (GET, or a write with an\n   empty body), use the SHA-256 of the empty string:\n   `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`\n   — safe to hardcode rather than recompute every time.\n2. Build the string to sign, joining the parts below with a real\n   newline character (not the literal characters `\\n`):\n\n   ```\n   AE-HMAC-SHA256\n   <METHOD>\n   <URL>\n   <bodyHash>\n   <ts>\n   ```\n\n   `<METHOD>` is uppercase (`GET`, `POST`, ...); `<URL>` is the\n   full request target including any query string; `<ts>` is the\n   current time as epoch milliseconds.\n3. Compute `sig` — HMAC-SHA256 of that string using `hmacKey` as\n   the key, hex-encoded.\n4. Send the header:\n\n```bash\ncurl https://partner-api.autoelevate.com/api/usage \\\n  -H \"Authorization: AE-HMAC-SHA256 token=aeh_xxx,bodyHash=<hex>,ts=<epochMs>,sig=<hex>\" \\\n  -H \"X-Acknowledgment: i-understand-this-is-beta-and-may-change\"\n```\n\n`ts` must be within 5 minutes of server time or the request is\nrejected.\n\n### 3. Keep Your Keys Safe\n\n- **Prefer short-lived keys.** Expiration presets go down to 15\n  minutes — for ad-hoc testing, shared machines, or any less-trusted\n  environment, create a short-lived key instead of reusing a\n  long-lived one.\n- **Scope to least privilege.** Grant only the permissions the\n  integration actually needs; avoid Full access keys for anything\n  long-lived.\n- **Store keys in a secrets manager** — never in source control,\n  tickets, chat, or shared documents. If a key is ever exposed,\n  revoke it immediately in the admin portal and create a new one.\n- **Rotate on personnel or role changes.** Keys are tied to the\n  service user they were created under; revoke keys that are no\n  longer needed.\n\n## Rate Limits\n\nLimits are applied **per MSP, per HTTP method, per route path** —\neach unique combination has its own bucket. Defaults during beta:\n\n| Bucket | Limit |\n|--------|-------|\n| Most endpoints | 100 requests per hour |\n| `/api/usage` | 100 requests per hour |\n\nThere is no separate per-minute burst layer today; the bucket\ncounter is a single sliding window. When rate-limited, the API\nreturns **429 Too Many Requests** with a `Retry-After` header.\nDefaults are conservative for beta and may rise as the surface\nstabilises.\n\n## Client Libraries\n\nGenerate a client from the OpenAPI spec:\n\n```bash\nnpx @openapitools/openapi-generator-cli generate \\\n  -i partners-openapi-spec.json \\\n  -g typescript-fetch -o ./partners-client-ts\n```"
+  },
+  "servers": [
+    {
+      "url": "https://partner-api.autoelevate.com",
+      "description": "Production"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "AutoElevate API key presented as a Bearer credential:\n\n    Authorization: Bearer <token>\n\nThe key must be created with the **AE-BEARER** scheme in the\nadmin portal. Keys can carry an optional scope list that\nnarrows their effective permissions — see route-level\n`security` for the scopes each endpoint accepts."
+      },
+      "HmacSignature": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization",
+        "description": "**Custom HMAC scheme.** Paste the full `Authorization`\nheader value, including the `AE-HMAC-SHA256` prefix and the\n`token`, `bodyHash`, `ts`, and `sig` parameters you have\ncomputed client-side. Off-the-shelf clients will not\nauto-sign these requests; this entry exists so the spec\nrecords that the API accepts this scheme alongside Bearer.\n\nWire format:\n\n    Authorization: AE-HMAC-SHA256 token=<aeh_…>,bodyHash=<hex>,ts=<epochMs>,sig=<hex>\n\nAt key creation the admin portal shows **two** values:\n\n- `token` — the wire identifier sent as `token=` on every\n  request.\n- `hmacKey` — the signing key. Kept client-side and never\n  transmitted. Used to compute `sig` = HMAC-SHA256 over\n  `AE-HMAC-SHA256\\n<METHOD>\\n<URL>\\n<bodyHash>\\n<ts>`,\n  where `<URL>` is the full request target including any\n  query string.\n\n`bodyHash` is the SHA-256 hex digest of the exact request\nbody bytes. For a request with no body (GET, or a write\nwith an empty body), use the SHA-256 of the empty string:\n`e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`\n— safe to hardcode rather than recompute every time.\n\n`ts` must be within 5 minutes of server time or the request is\nrejected.\n\nThe key must be created with the **AE-HMAC-SHA256** scheme\nin the admin portal."
+      }
+    },
+    "schemas": {
+      "ApproveElevationRequestPayload": {
+        "type": "object",
+        "properties": {
+          "elevationType": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "user"
+            ],
+            "description": "Elevation level granted for the approval. `admin` performs the elevation with admin rights; `user` keeps the action at the user level. Optional — defaults to the request's existing elevation type."
+          },
+          "createRule": {
+            "type": "boolean",
+            "description": "When `true`, also create an auto-approval rule from this request so future matching elevations resolve automatically. Requires `ruleLevel`."
+          },
+          "ruleLevel": {
+            "type": "string",
+            "enum": [
+              "msp",
+              "company",
+              "location",
+              "computer"
+            ],
+            "description": "Scope at which an auto-created rule applies: `computer`, `location`, `company`, or `msp` (all companies). Required when `createRule` is `true`."
+          },
+          "durationInMinutes": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "For elevated-session requests, the length of the resulting session in minutes. Ignored for non-session requests."
+          }
+        }
+      },
+      "AuditLogActor": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Identifier of the user that performed the action.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "human"
+            ],
+            "description": "Kind of actor. Currently always `human`: this feed only surfaces entries attributable to a user account."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The actor's current display name (a live lookup, not the name captured at the time of the event)."
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "name"
+        ]
+      },
+      "AuditLogEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Audit log entry id.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "action": {
+            "type": "string",
+            "description": "Normalized action, formatted `<entityType>.<verb>` where verb is one of `created`, `updated`, or `deleted`.",
+            "example": "users.updated"
+          },
+          "entityType": {
+            "type": "string",
+            "description": "Type of object the action was performed on.",
+            "example": "users"
+          },
+          "entityId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Identifier of the affected record.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "actor": {
+            "$ref": "#/components/schemas/AuditLogActor"
+          },
+          "occurredAt": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Time in milliseconds since the Unix epoch.",
+            "example": 1716900000000
+          },
+          "diff": {
+            "description": "Before/after payload. `{ after }` for a create, `{ before }` for a delete, `{ before, after }` for an update."
+          }
+        },
+        "required": [
+          "id",
+          "action",
+          "entityType",
+          "entityId",
+          "actor",
+          "occurredAt"
+        ]
+      },
+      "Company": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Company identifier.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "name": {
+            "type": "string",
+            "description": "Company name.",
+            "example": "Acme Manufacturing"
+          },
+          "initials": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Short form of the company name.",
+            "example": "AM"
+          },
+          "managementSystemCompanyId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "External identifier the partner provided for this company. Defaults to the company name at creation when the partner supplies none; may be `null` for companies created through other paths."
+          },
+          "createdAt": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Time in milliseconds since the Unix epoch.",
+            "example": 1716900000000
+          },
+          "updatedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Time in milliseconds since the Unix epoch.",
+            "example": 1716900000000
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "initials",
+          "managementSystemCompanyId",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "Computer": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Computer identifier.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "machineName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Reported OS machine name.",
+            "example": "WS-FINANCE-04"
+          },
+          "operatingSystem": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "OS family name (e.g. \"Windows 11 Pro\")."
+              },
+              "version": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "OS version string."
+              }
+            },
+            "required": [
+              "name",
+              "version"
+            ],
+            "description": "Operating-system summary."
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Location the computer is assigned to.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "companyId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Company the computer belongs to.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "elevationMode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "audit",
+              "live",
+              "policy",
+              "technicianBypass",
+              null
+            ],
+            "description": "Effective elevation mode the agent last reported. `null` when the agent has not reported a recognized mode."
+          },
+          "lastCheckedInAt": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Most recent agent check-in. `null` when the computer has never reported in.",
+            "example": 1716900000000
+          },
+          "createdAt": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Time in milliseconds since the Unix epoch.",
+            "example": 1716900000000
+          },
+          "updatedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Time in milliseconds since the Unix epoch.",
+            "example": 1716900000000
+          }
+        },
+        "required": [
+          "id",
+          "machineName",
+          "operatingSystem",
+          "locationId",
+          "companyId",
+          "elevationMode",
+          "lastCheckedInAt",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "DenyElevationRequestPayload": {
+        "type": "object",
+        "properties": {
+          "createRule": {
+            "type": "boolean",
+            "description": "When `true`, also create a denial rule from this request so future matching elevations are auto-denied. Requires `ruleLevel`."
+          },
+          "ruleLevel": {
+            "type": "string",
+            "enum": [
+              "msp",
+              "company",
+              "location",
+              "computer"
+            ],
+            "description": "Scope at which an auto-created rule applies: `computer`, `location`, `company`, or `msp` (all companies). Required when `createRule` is `true`."
+          },
+          "denialReason": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "Free-text reason for the denial, shown to the end user on their machine alongside the denial notification. Plain text; maximum 1000 characters."
+          }
+        }
+      },
+      "ElevatedSession": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Elevated-session identifier.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "computerId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A UUID identifier.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "userName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The OS user who held the elevated session, if known."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "completed",
+              "expired"
+            ],
+            "description": "Lifecycle state of the elevated session."
+          },
+          "startedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Time in milliseconds since the Unix epoch.",
+            "example": 1716900000000
+          },
+          "endedAt": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "The session's scheduled end time, epoch milliseconds. Set when the session is created and not updated if it ends early, so it reflects the scheduled — not necessarily the actual — end.",
+            "example": 1716900000000
+          },
+          "durationMs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Scheduled session duration in milliseconds (`endedAt` − `startedAt`)."
+          }
+        },
+        "required": [
+          "id",
+          "computerId",
+          "userName",
+          "status",
+          "startedAt",
+          "endedAt",
+          "durationMs"
+        ]
+      },
+      "ElevationEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Elevation event identifier.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "computerId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Computer that emitted the event.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "computerName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Friendly machine name of the computer at the time of the event.",
+            "example": "WS-FINANCE-04"
+          },
+          "companyName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Company that the computer belongs to.",
+            "example": "Acme Industries"
+          },
+          "locationName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Location within the company.",
+            "example": "Headquarters"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "trigger": {
+                "description": "The trigger that fired the event (path, file hash, signer, etc.). Shape varies by trigger source. `null` when the event carried no trigger."
+              },
+              "user": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "description": "The OS user that initiated the action; `null` when the event carried no user."
+              },
+              "ruleThatApplied": {
+                "description": "The rule (if any) that matched at event time. `null` when no rule matched."
+              }
+            },
+            "required": [
+              "user"
+            ],
+            "description": "Minimal event payload exposed to partners. Detailed agent diagnostics are intentionally omitted."
+          },
+          "createdAt": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "When the event was recorded by the API.",
+            "example": 1716900000000
+          }
+        },
+        "required": [
+          "id",
+          "computerId",
+          "computerName",
+          "companyName",
+          "locationName",
+          "data",
+          "createdAt"
+        ]
+      },
+      "ElevationRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Elevation-request id.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "computerId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A UUID identifier.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "approvalState": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "APPROVED",
+              "DENIED",
+              "WITHDRAWN"
+            ],
+            "description": "Current approval state of the request."
+          },
+          "requestedBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "OS user name that requested elevation, if known."
+          },
+          "targetDescription": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Short description of what is being elevated (e.g. \"Install Foo.exe\")."
+          },
+          "createdAt": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Time in milliseconds since the Unix epoch.",
+            "example": 1716900000000
+          },
+          "denialReason": {
+            "type": "string",
+            "description": "Free-text reason recorded when the request was denied, shown to the end user alongside the denial notification. Plain text. Present only when a denial reason was set."
+          }
+        },
+        "required": [
+          "id",
+          "computerId",
+          "approvalState",
+          "requestedBy",
+          "targetDescription",
+          "createdAt"
+        ]
+      },
+      "ElevationRule": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Elevation-rule identifier.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "level": {
+            "$ref": "#/components/schemas/ElevationRuleScope"
+          },
+          "mspId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "MSP this rule applies to. Set when `level` is `msp`, otherwise `null`.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "companyId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Company this rule applies to. Set when `level` is `company`, otherwise `null`.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "locationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Location this rule applies to. Set when `level` is `location`, otherwise `null`.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "computerId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Computer this rule applies to. Set when `level` is `computer`, otherwise `null`.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "approved": {
+            "type": "boolean",
+            "description": "When `true`, matching elevations are auto-approved; when `false`, they are auto-denied."
+          },
+          "elevationType": {
+            "$ref": "#/components/schemas/RuleElevationType"
+          },
+          "shouldIgnore": {
+            "type": "boolean",
+            "description": "When `true`, the agent treats matching events as audit-mode and does not prompt to elevate."
+          },
+          "friendlyName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional human-readable name an admin set on the rule."
+          },
+          "identificationCriteria": {
+            "description": "Opaque criteria the agent matches against incoming events to decide whether this rule applies. Shape is intentionally not part of the public contract — treat as a passthrough."
+          },
+          "createdAt": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Time in milliseconds since the Unix epoch.",
+            "example": 1716900000000
+          },
+          "updatedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Time in milliseconds since the Unix epoch.",
+            "example": 1716900000000
+          }
+        },
+        "required": [
+          "id",
+          "level",
+          "mspId",
+          "companyId",
+          "locationId",
+          "computerId",
+          "approved",
+          "elevationType",
+          "shouldIgnore",
+          "friendlyName",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "ElevationRuleScope": {
+        "type": "string",
+        "enum": [
+          "msp",
+          "company",
+          "location",
+          "computer"
+        ],
+        "description": "Scope at which the elevation rule applies. Derived from which of `mspId`, `companyId`, `locationId`, or `computerId` is set on the underlying record."
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Error class name.",
+            "example": "BadRequestError"
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable, partner-safe error message.",
+            "example": "query.take: Number must be less than or equal to 200"
+          },
+          "statusCode": {
+            "type": "integer",
+            "description": "HTTP status code, mirrored in the response body.",
+            "example": 400
+          }
+        },
+        "required": [
+          "name",
+          "message",
+          "statusCode"
+        ]
+      },
+      "ListAuditLogsResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditLogEntry"
+            },
+            "description": "Page of audit log entries."
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor to pass as `cursor` for the next page, or `null` when there are no more results."
+          },
+          "hasMore": {
+            "type": "boolean",
+            "description": "True when more results exist beyond this page."
+          },
+          "totalCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Total entries matching the filters, ignoring pagination.",
+            "example": 1234
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "hasMore",
+          "totalCount"
+        ]
+      },
+      "ListCompaniesResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Company"
+            },
+            "description": "Page of results."
+          },
+          "totalCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Total number of items matching the filters, ignoring pagination. Note: `0` is returned when `skip` is past the end of the result set.",
+            "example": 1234
+          }
+        },
+        "required": [
+          "items",
+          "totalCount"
+        ]
+      },
+      "ListComputersResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Computer"
+            },
+            "description": "Page of results."
+          },
+          "totalCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Total number of items matching the filters, ignoring pagination. Note: `0` is returned when `skip` is past the end of the result set.",
+            "example": 1234
+          }
+        },
+        "required": [
+          "items",
+          "totalCount"
+        ]
+      },
+      "ListElevatedSessionsResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ElevatedSession"
+            },
+            "description": "Page of results."
+          },
+          "totalCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Total number of items matching the filters, ignoring pagination. Note: `0` is returned when `skip` is past the end of the result set.",
+            "example": 1234
+          }
+        },
+        "required": [
+          "items",
+          "totalCount"
+        ]
+      },
+      "ListElevationEventsResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ElevationEvent"
+            },
+            "description": "Page of results."
+          },
+          "totalCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Total number of items matching the filters, ignoring pagination. Note: `0` is returned when `skip` is past the end of the result set.",
+            "example": 1234
+          }
+        },
+        "required": [
+          "items",
+          "totalCount"
+        ]
+      },
+      "ListElevationRequestsResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ElevationRequest"
+            },
+            "description": "Page of results."
+          },
+          "totalCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Total number of items matching the filters, ignoring pagination. Note: `0` is returned when `skip` is past the end of the result set.",
+            "example": 1234
+          }
+        },
+        "required": [
+          "items",
+          "totalCount"
+        ]
+      },
+      "ListElevationRulesResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ElevationRule"
+            },
+            "description": "Page of results."
+          },
+          "totalCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Total number of items matching the filters, ignoring pagination. Note: `0` is returned when `skip` is past the end of the result set.",
+            "example": 1234
+          }
+        },
+        "required": [
+          "items",
+          "totalCount"
+        ]
+      },
+      "ListLocationsResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Location"
+            },
+            "description": "Page of results."
+          },
+          "totalCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Total number of items matching the filters, ignoring pagination. Note: `0` is returned when `skip` is past the end of the result set.",
+            "example": 1234
+          }
+        },
+        "required": [
+          "items",
+          "totalCount"
+        ]
+      },
+      "Location": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Location identifier.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "name": {
+            "type": "string",
+            "description": "Location name.",
+            "example": "Headquarters"
+          },
+          "companyId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Company this location belongs to.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "companyName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Company name, denormalized for convenience."
+          },
+          "createdAt": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Time in milliseconds since the Unix epoch.",
+            "example": 1716900000000
+          },
+          "updatedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Time in milliseconds since the Unix epoch.",
+            "example": 1716900000000
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "companyId",
+          "companyName",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "NotAcceptableError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "example": "Not Acceptable"
+          },
+          "supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Media types this endpoint can produce.",
+            "example": [
+              "application/json"
+            ]
+          }
+        },
+        "required": [
+          "error",
+          "supported"
+        ]
+      },
+      "RateLimitError": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Error"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "retryAfterInSeconds": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Seconds to wait before retrying. When present, also sent as the `Retry-After` response header.",
+                "example": 3600
+              }
+            }
+          }
+        ]
+      },
+      "RuleElevationType": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "enum": [
+          "system",
+          "admin",
+          "user",
+          null
+        ],
+        "description": "Elevation level used when applying an approval rule (e.g. `admin` or `user`)."
+      },
+      "UsageResponse": {
+        "type": "object",
+        "properties": {
+          "partnerId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique partner (MSP) identifier.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "partnerName": {
+            "type": "string",
+            "description": "Partner organization name.",
+            "example": "Acme MSP"
+          },
+          "blockerEnabled": {
+            "type": "boolean",
+            "description": "Whether any computers have application blocking configured (audit or live mode)."
+          },
+          "justInTimeAdminLoginEnabled": {
+            "type": "boolean",
+            "description": "Whether any computers have just-in-time admin login enabled."
+          },
+          "totalActiveAgents": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of agent installations seen in the last 30 days. A periodically-refreshed snapshot, not a live count.",
+            "example": 142
+          }
+        },
+        "required": [
+          "partnerId",
+          "partnerName",
+          "blockerEnabled",
+          "justInTimeAdminLoginEnabled",
+          "totalActiveAgents"
+        ]
+      }
+    },
+    "parameters": {}
+  },
+  "paths": {
+    "/api/v1/audit-logs": {
+      "get": {
+        "operationId": "getAuditLogsV1",
+        "summary": "List audit log entries",
+        "description": "Returns a keyset-paginated list of audit log entries scoped to the authenticated partner's MSP — use it for compliance reporting and QBR-style usage reconstruction. The feed currently covers **user** and **setting** changes; filter with `entityType` and `action`. Pass the `nextCursor` from each response back as `cursor` to page; results are bounded to the last 30 days.",
+        "tags": [
+          "Audit Logs"
+        ],
+        "security": [
+          {
+            "BearerToken": [
+              "auditLogView"
+            ]
+          },
+          {
+            "HmacSignature": [
+              "auditLogView"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50,
+              "description": "Maximum number of items to return. Defaults to 50, capped at 200.",
+              "example": 50
+            },
+            "required": false,
+            "description": "Maximum number of items to return. Defaults to 50, capped at 200.",
+            "name": "take",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Opaque pagination cursor. Pass the `nextCursor` from a previous response to fetch the next page."
+            },
+            "required": false,
+            "description": "Opaque pagination cursor. Pass the `nextCursor` from a previous response to fetch the next page.",
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "users",
+                "settings"
+              ],
+              "description": "Audited entity type to filter by. The feed currently covers user and setting changes."
+            },
+            "required": false,
+            "description": "Audited entity type to filter by. The feed currently covers user and setting changes.",
+            "name": "entityType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "created",
+                "updated",
+                "deleted"
+              ],
+              "description": "Filter by action verb."
+            },
+            "required": false,
+            "description": "Filter by action verb.",
+            "name": "action",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "description": "Inclusive start of the date range, epoch milliseconds. Optional; when omitted, each endpoint applies its own default lower bound (see the endpoint description).",
+              "example": 1716800000000
+            },
+            "required": false,
+            "description": "Inclusive start of the date range, epoch milliseconds. Optional; when omitted, each endpoint applies its own default lower bound (see the endpoint description).",
+            "name": "start",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "description": "Inclusive end of the date range, epoch milliseconds. Optional; when omitted, each endpoint applies its own default upper bound (see the endpoint description).",
+              "example": 1716900000000
+            },
+            "required": false,
+            "description": "Inclusive end of the date range, epoch milliseconds. Optional; when omitted, each endpoint applies its own default upper bound (see the endpoint description).",
+            "name": "end",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "i-understand-this-is-beta-and-may-change"
+              ],
+              "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+              "example": "i-understand-this-is-beta-and-may-change"
+            },
+            "required": true,
+            "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+            "name": "X-Acknowledgment",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListAuditLogsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — missing or invalid `X-Acknowledgment` beta header, or input validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing, invalid, or scheme-disabled credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — the token lacks a required scope, is not scoped to an MSP, or the requested resource is outside the token's tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "Not Acceptable — Accept header does not match any supported media type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAcceptableError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/companies": {
+      "get": {
+        "operationId": "getCompaniesV1",
+        "summary": "List companies",
+        "description": "Returns a paginated list of companies the authenticated partner can access within its MSP. A token with restricted company access sees only the companies it is permitted, not the entire MSP.",
+        "tags": [
+          "Companies"
+        ],
+        "security": [
+          {
+            "BearerToken": [
+              "companyView"
+            ]
+          },
+          {
+            "HmacSignature": [
+              "companyView"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50,
+              "description": "Maximum number of items to return. Defaults to 50, capped at 200.",
+              "example": 50
+            },
+            "required": false,
+            "description": "Maximum number of items to return. Defaults to 50, capped at 200.",
+            "name": "take",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "default": 0,
+              "description": "Number of items to skip for pagination.",
+              "example": 0
+            },
+            "required": false,
+            "description": "Number of items to skip for pagination.",
+            "name": "skip",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "i-understand-this-is-beta-and-may-change"
+              ],
+              "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+              "example": "i-understand-this-is-beta-and-may-change"
+            },
+            "required": true,
+            "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+            "name": "X-Acknowledgment",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListCompaniesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — missing or invalid `X-Acknowledgment` beta header, or input validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing, invalid, or scheme-disabled credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — the token lacks a required scope, is not scoped to an MSP, or the requested resource is outside the token's tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "Not Acceptable — Accept header does not match any supported media type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAcceptableError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/companies/{id}": {
+      "get": {
+        "operationId": "getCompaniesByIdV1",
+        "summary": "Get a single company",
+        "description": "Returns one company by id. Responds with 404 when the id does not exist, or 403 when it belongs to a different MSP or a company the token cannot access. (Under a restricted-access token a non-existent id may surface as 403 rather than 404.)",
+        "tags": [
+          "Companies"
+        ],
+        "security": [
+          {
+            "BearerToken": [
+              "companyView"
+            ]
+          },
+          {
+            "HmacSignature": [
+              "companyView"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Company identifier.",
+              "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            },
+            "required": true,
+            "description": "Company identifier.",
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "i-understand-this-is-beta-and-may-change"
+              ],
+              "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+              "example": "i-understand-this-is-beta-and-may-change"
+            },
+            "required": true,
+            "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+            "name": "X-Acknowledgment",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Company"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — missing or invalid `X-Acknowledgment` beta header, or input validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing, invalid, or scheme-disabled credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — the token lacks a required scope, is not scoped to an MSP, or the requested resource is outside the token's tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found — no resource with the given id is visible to this token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "Not Acceptable — Accept header does not match any supported media type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAcceptableError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/computers": {
+      "get": {
+        "operationId": "getComputersV1",
+        "summary": "List computers",
+        "description": "Returns a paginated list of computers within the authenticated partner's MSP, optionally filtered by company or location. Only computers that have checked in within the last 30 days are returned (the active-fleet window).",
+        "tags": [
+          "Computers"
+        ],
+        "security": [
+          {
+            "BearerToken": [
+              "computerView"
+            ]
+          },
+          {
+            "HmacSignature": [
+              "computerView"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50,
+              "description": "Maximum number of items to return. Defaults to 50, capped at 200.",
+              "example": 50
+            },
+            "required": false,
+            "description": "Maximum number of items to return. Defaults to 50, capped at 200.",
+            "name": "take",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "default": 0,
+              "description": "Number of items to skip for pagination.",
+              "example": 0
+            },
+            "required": false,
+            "description": "Number of items to skip for pagination.",
+            "name": "skip",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Scope results to a single company managed by the authenticated partner. Omit to return data across all companies the partner has access to.",
+              "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            },
+            "required": false,
+            "description": "Scope results to a single company managed by the authenticated partner. Omit to return data across all companies the partner has access to.",
+            "name": "companyId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Scope results to a single location.",
+              "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            },
+            "required": false,
+            "description": "Scope results to a single location.",
+            "name": "locationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "i-understand-this-is-beta-and-may-change"
+              ],
+              "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+              "example": "i-understand-this-is-beta-and-may-change"
+            },
+            "required": true,
+            "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+            "name": "X-Acknowledgment",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListComputersResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — missing or invalid `X-Acknowledgment` beta header, or input validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing, invalid, or scheme-disabled credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — the token lacks a required scope, is not scoped to an MSP, or the requested resource is outside the token's tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "Not Acceptable — Accept header does not match any supported media type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAcceptableError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/computers/{id}": {
+      "get": {
+        "operationId": "getComputersByIdV1",
+        "summary": "Get a single computer",
+        "description": "Returns one computer by id. Responds with 422 when the id does not exist, or 403 when it belongs to a different MSP or a company the token cannot access.",
+        "tags": [
+          "Computers"
+        ],
+        "security": [
+          {
+            "BearerToken": [
+              "computerView"
+            ]
+          },
+          {
+            "HmacSignature": [
+              "computerView"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Computer identifier.",
+              "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            },
+            "required": true,
+            "description": "Computer identifier.",
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "i-understand-this-is-beta-and-may-change"
+              ],
+              "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+              "example": "i-understand-this-is-beta-and-may-change"
+            },
+            "required": true,
+            "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+            "name": "X-Acknowledgment",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Computer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — missing or invalid `X-Acknowledgment` beta header, or input validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing, invalid, or scheme-disabled credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — the token lacks a required scope, is not scoped to an MSP, or the requested resource is outside the token's tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "Not Acceptable — Accept header does not match any supported media type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAcceptableError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content — the referenced id does not exist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/elevated-sessions": {
+      "get": {
+        "operationId": "getElevatedSessionsV1",
+        "summary": "List elevated sessions",
+        "description": "Returns a paginated list of elevated technician sessions across the authenticated partner's MSP, newest first. Use `status`, `companyId`, or `computerId` to narrow results. The `status` value is derived at read time from the stored session status and whether the scheduled `endedAt` has elapsed — `expired` indicates a session whose `endedAt` has passed but was never closed by the agent.",
+        "tags": [
+          "Elevated Sessions"
+        ],
+        "security": [
+          {
+            "BearerToken": [
+              "elevatedSessionView"
+            ]
+          },
+          {
+            "HmacSignature": [
+              "elevatedSessionView"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50,
+              "description": "Maximum number of items to return. Defaults to 50, capped at 200.",
+              "example": 50
+            },
+            "required": false,
+            "description": "Maximum number of items to return. Defaults to 50, capped at 200.",
+            "name": "take",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "default": 0,
+              "description": "Number of items to skip for pagination.",
+              "example": 0
+            },
+            "required": false,
+            "description": "Number of items to skip for pagination.",
+            "name": "skip",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Scope results to a single company managed by the authenticated partner. Omit to return data across all companies the partner has access to.",
+              "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            },
+            "required": false,
+            "description": "Scope results to a single company managed by the authenticated partner. Omit to return data across all companies the partner has access to.",
+            "name": "companyId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Scope results to a single computer.",
+              "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            },
+            "required": false,
+            "description": "Scope results to a single computer.",
+            "name": "computerId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "inactive"
+              ],
+              "description": "`active` returns currently running sessions; `inactive` returns every session that has ended (completed or expired)."
+            },
+            "required": false,
+            "description": "`active` returns currently running sessions; `inactive` returns every session that has ended (completed or expired).",
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "i-understand-this-is-beta-and-may-change"
+              ],
+              "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+              "example": "i-understand-this-is-beta-and-may-change"
+            },
+            "required": true,
+            "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+            "name": "X-Acknowledgment",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListElevatedSessionsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — missing or invalid `X-Acknowledgment` beta header, or input validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing, invalid, or scheme-disabled credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — the token lacks a required scope, is not scoped to an MSP, or the requested resource is outside the token's tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "Not Acceptable — Accept header does not match any supported media type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAcceptableError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/elevated-sessions/{id}": {
+      "get": {
+        "operationId": "getElevatedSessionsByIdV1",
+        "summary": "Get a single elevated session",
+        "description": "Returns one elevated session by id. Responds with 404 when the id does not exist, or 403 when it belongs to a different MSP.",
+        "tags": [
+          "Elevated Sessions"
+        ],
+        "security": [
+          {
+            "BearerToken": [
+              "elevatedSessionView"
+            ]
+          },
+          {
+            "HmacSignature": [
+              "elevatedSessionView"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Elevated-session identifier.",
+              "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            },
+            "required": true,
+            "description": "Elevated-session identifier.",
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "i-understand-this-is-beta-and-may-change"
+              ],
+              "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+              "example": "i-understand-this-is-beta-and-may-change"
+            },
+            "required": true,
+            "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+            "name": "X-Acknowledgment",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ElevatedSession"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — missing or invalid `X-Acknowledgment` beta header, or input validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing, invalid, or scheme-disabled credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — the token lacks a required scope, is not scoped to an MSP, or the requested resource is outside the token's tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found — no resource with the given id is visible to this token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "Not Acceptable — Accept header does not match any supported media type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAcceptableError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/elevation-events": {
+      "get": {
+        "operationId": "getElevationEventsV1",
+        "summary": "List elevation events",
+        "description": "Returns a paginated list of elevation events emitted by the AutoElevate agent, scoped to the authenticated partner's MSP. Use `companyId` to narrow to a single company and `start`/`end` (epoch milliseconds) to bound the time range. Blocker events will be exposed via a separate `/api/blocker-events` endpoint once that capability lands.",
+        "tags": [
+          "Elevation Events"
+        ],
+        "security": [
+          {
+            "BearerToken": [
+              "eventView"
+            ]
+          },
+          {
+            "HmacSignature": [
+              "eventView"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50,
+              "description": "Maximum number of items to return. Defaults to 50, capped at 200.",
+              "example": 50
+            },
+            "required": false,
+            "description": "Maximum number of items to return. Defaults to 50, capped at 200.",
+            "name": "take",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "default": 0,
+              "description": "Number of items to skip for pagination.",
+              "example": 0
+            },
+            "required": false,
+            "description": "Number of items to skip for pagination.",
+            "name": "skip",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "description": "Inclusive start of the date range, epoch milliseconds. Optional; when omitted, each endpoint applies its own default lower bound (see the endpoint description).",
+              "example": 1716800000000
+            },
+            "required": false,
+            "description": "Inclusive start of the date range, epoch milliseconds. Optional; when omitted, each endpoint applies its own default lower bound (see the endpoint description).",
+            "name": "start",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "description": "Inclusive end of the date range, epoch milliseconds. Optional; when omitted, each endpoint applies its own default upper bound (see the endpoint description).",
+              "example": 1716900000000
+            },
+            "required": false,
+            "description": "Inclusive end of the date range, epoch milliseconds. Optional; when omitted, each endpoint applies its own default upper bound (see the endpoint description).",
+            "name": "end",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Scope results to a single company managed by the authenticated partner. Omit to return data across all companies the partner has access to.",
+              "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            },
+            "required": false,
+            "description": "Scope results to a single company managed by the authenticated partner. Omit to return data across all companies the partner has access to.",
+            "name": "companyId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "i-understand-this-is-beta-and-may-change"
+              ],
+              "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+              "example": "i-understand-this-is-beta-and-may-change"
+            },
+            "required": true,
+            "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+            "name": "X-Acknowledgment",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListElevationEventsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — missing or invalid `X-Acknowledgment` beta header, or input validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing, invalid, or scheme-disabled credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — the token lacks a required scope, is not scoped to an MSP, or the requested resource is outside the token's tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "Not Acceptable — Accept header does not match any supported media type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAcceptableError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/elevation-requests": {
+      "get": {
+        "operationId": "getElevationRequestsV1",
+        "summary": "List elevation requests",
+        "description": "Returns a paginated list of elevation requests across the authenticated partner's MSP. Use `approvalState`, `companyId`, and the time range to filter.",
+        "tags": [
+          "Elevation Requests"
+        ],
+        "security": [
+          {
+            "BearerToken": [
+              "requestView"
+            ]
+          },
+          {
+            "HmacSignature": [
+              "requestView"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50,
+              "description": "Maximum number of items to return. Defaults to 50, capped at 200.",
+              "example": 50
+            },
+            "required": false,
+            "description": "Maximum number of items to return. Defaults to 50, capped at 200.",
+            "name": "take",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "default": 0,
+              "description": "Number of items to skip for pagination.",
+              "example": 0
+            },
+            "required": false,
+            "description": "Number of items to skip for pagination.",
+            "name": "skip",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "description": "Inclusive start of the date range, epoch milliseconds. Optional; when omitted, each endpoint applies its own default lower bound (see the endpoint description).",
+              "example": 1716800000000
+            },
+            "required": false,
+            "description": "Inclusive start of the date range, epoch milliseconds. Optional; when omitted, each endpoint applies its own default lower bound (see the endpoint description).",
+            "name": "start",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "description": "Inclusive end of the date range, epoch milliseconds. Optional; when omitted, each endpoint applies its own default upper bound (see the endpoint description).",
+              "example": 1716900000000
+            },
+            "required": false,
+            "description": "Inclusive end of the date range, epoch milliseconds. Optional; when omitted, each endpoint applies its own default upper bound (see the endpoint description).",
+            "name": "end",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Scope results to a single company managed by the authenticated partner. Omit to return data across all companies the partner has access to.",
+              "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            },
+            "required": false,
+            "description": "Scope results to a single company managed by the authenticated partner. Omit to return data across all companies the partner has access to.",
+            "name": "companyId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "PENDING",
+                "APPROVED",
+                "DENIED",
+                "WITHDRAWN"
+              ],
+              "description": "Current approval state of the request."
+            },
+            "required": false,
+            "description": "Current approval state of the request.",
+            "name": "approvalState",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "i-understand-this-is-beta-and-may-change"
+              ],
+              "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+              "example": "i-understand-this-is-beta-and-may-change"
+            },
+            "required": true,
+            "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+            "name": "X-Acknowledgment",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListElevationRequestsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — missing or invalid `X-Acknowledgment` beta header, or input validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing, invalid, or scheme-disabled credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — the token lacks a required scope, is not scoped to an MSP, or the requested resource is outside the token's tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "Not Acceptable — Accept header does not match any supported media type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAcceptableError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/elevation-requests/{id}": {
+      "get": {
+        "operationId": "getElevationRequestsByIdV1",
+        "summary": "Get a single elevation request",
+        "description": "Returns one elevation request by id. Responds with 404 when the id does not exist or belongs to a different MSP.",
+        "tags": [
+          "Elevation Requests"
+        ],
+        "security": [
+          {
+            "BearerToken": [
+              "requestView"
+            ]
+          },
+          {
+            "HmacSignature": [
+              "requestView"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Elevation-request id.",
+              "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            },
+            "required": true,
+            "description": "Elevation-request id.",
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "i-understand-this-is-beta-and-may-change"
+              ],
+              "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+              "example": "i-understand-this-is-beta-and-may-change"
+            },
+            "required": true,
+            "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+            "name": "X-Acknowledgment",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ElevationRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — missing or invalid `X-Acknowledgment` beta header, or input validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing, invalid, or scheme-disabled credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — the token lacks a required scope, is not scoped to an MSP, or the requested resource is outside the token's tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found — no resource with the given id is visible to this token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "Not Acceptable — Accept header does not match any supported media type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAcceptableError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/elevation-requests/{id}/approve": {
+      "post": {
+        "operationId": "postElevationRequestsByIdApproveV1",
+        "summary": "Approve an elevation request",
+        "description": "Approves a pending elevation request, transitioning it to the `APPROVED` state. The request must currently be in the `PENDING` state — approving any other state returns 409. Optional `elevationType` overrides the elevation level (`admin` vs. `user`) recorded on the request. Set `createRule: true` with a `ruleLevel` to also create an auto-approval rule from this request. For elevated-session requests, `durationInMinutes` controls the resulting session length.",
+        "tags": [
+          "Elevation Requests"
+        ],
+        "security": [
+          {
+            "BearerToken": [
+              "requestEdit"
+            ]
+          },
+          {
+            "HmacSignature": [
+              "requestEdit"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Elevation-request id.",
+              "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            },
+            "required": true,
+            "description": "Elevation-request id.",
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "i-understand-this-is-beta-and-may-change"
+              ],
+              "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+              "example": "i-understand-this-is-beta-and-may-change"
+            },
+            "required": true,
+            "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+            "name": "X-Acknowledgment",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveElevationRequestPayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ElevationRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — missing or invalid `X-Acknowledgment` beta header, or input validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing, invalid, or scheme-disabled credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — the token lacks a required scope, is not scoped to an MSP, or the requested resource is outside the token's tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "Not Acceptable — Accept header does not match any supported media type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAcceptableError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict — the request is not in a state that allows this transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/elevation-requests/{id}/deny": {
+      "post": {
+        "operationId": "postElevationRequestsByIdDenyV1",
+        "summary": "Deny an elevation request",
+        "description": "Denies a pending elevation request, transitioning it to the `DENIED` state. The request must currently be in the `PENDING` state — denying any other state returns 409. Set `createRule: true` with a `ruleLevel` to also create a denial rule from this request.",
+        "tags": [
+          "Elevation Requests"
+        ],
+        "security": [
+          {
+            "BearerToken": [
+              "requestEdit"
+            ]
+          },
+          {
+            "HmacSignature": [
+              "requestEdit"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Elevation-request id.",
+              "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            },
+            "required": true,
+            "description": "Elevation-request id.",
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "i-understand-this-is-beta-and-may-change"
+              ],
+              "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+              "example": "i-understand-this-is-beta-and-may-change"
+            },
+            "required": true,
+            "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+            "name": "X-Acknowledgment",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DenyElevationRequestPayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ElevationRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — missing or invalid `X-Acknowledgment` beta header, or input validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing, invalid, or scheme-disabled credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — the token lacks a required scope, is not scoped to an MSP, or the requested resource is outside the token's tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "Not Acceptable — Accept header does not match any supported media type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAcceptableError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict — the request is not in a state that allows this transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/elevation-rules": {
+      "get": {
+        "operationId": "getElevationRulesV1",
+        "summary": "List elevation rules",
+        "description": "Returns a paginated list of auto-approval, auto-deny, and audit-mode (ignore) elevation rules across the authenticated partner's MSP. Each rule applies at one of four scope levels (`msp`, `company`, `location`, `computer`) and matches incoming elevation events against an opaque set of `identificationCriteria`. Use `companyId` to narrow to a single company.",
+        "tags": [
+          "Elevation Rules"
+        ],
+        "security": [
+          {
+            "BearerToken": [
+              "ruleView"
+            ]
+          },
+          {
+            "HmacSignature": [
+              "ruleView"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50,
+              "description": "Maximum number of items to return. Defaults to 50, capped at 200.",
+              "example": 50
+            },
+            "required": false,
+            "description": "Maximum number of items to return. Defaults to 50, capped at 200.",
+            "name": "take",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "default": 0,
+              "description": "Number of items to skip for pagination.",
+              "example": 0
+            },
+            "required": false,
+            "description": "Number of items to skip for pagination.",
+            "name": "skip",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Scope results to a single company managed by the authenticated partner. Omit to return data across all companies the partner has access to.",
+              "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            },
+            "required": false,
+            "description": "Scope results to a single company managed by the authenticated partner. Omit to return data across all companies the partner has access to.",
+            "name": "companyId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "i-understand-this-is-beta-and-may-change"
+              ],
+              "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+              "example": "i-understand-this-is-beta-and-may-change"
+            },
+            "required": true,
+            "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+            "name": "X-Acknowledgment",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListElevationRulesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — missing or invalid `X-Acknowledgment` beta header, or input validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing, invalid, or scheme-disabled credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — the token lacks a required scope, is not scoped to an MSP, or the requested resource is outside the token's tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "Not Acceptable — Accept header does not match any supported media type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAcceptableError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/locations": {
+      "get": {
+        "operationId": "getLocationsV1",
+        "summary": "List locations",
+        "description": "Returns a paginated list of locations across the companies the authenticated partner can access within its MSP, ordered by creation time (oldest first) and optionally filtered by company.",
+        "tags": [
+          "Locations"
+        ],
+        "security": [
+          {
+            "BearerToken": [
+              "locationView"
+            ]
+          },
+          {
+            "HmacSignature": [
+              "locationView"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50,
+              "description": "Maximum number of items to return. Defaults to 50, capped at 200.",
+              "example": 50
+            },
+            "required": false,
+            "description": "Maximum number of items to return. Defaults to 50, capped at 200.",
+            "name": "take",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "default": 0,
+              "description": "Number of items to skip for pagination.",
+              "example": 0
+            },
+            "required": false,
+            "description": "Number of items to skip for pagination.",
+            "name": "skip",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Scope results to a single company managed by the authenticated partner. Omit to return data across all companies the partner has access to.",
+              "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            },
+            "required": false,
+            "description": "Scope results to a single company managed by the authenticated partner. Omit to return data across all companies the partner has access to.",
+            "name": "companyId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "i-understand-this-is-beta-and-may-change"
+              ],
+              "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+              "example": "i-understand-this-is-beta-and-may-change"
+            },
+            "required": true,
+            "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+            "name": "X-Acknowledgment",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListLocationsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — missing or invalid `X-Acknowledgment` beta header, or input validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing, invalid, or scheme-disabled credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — the token lacks a required scope, is not scoped to an MSP, or the requested resource is outside the token's tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "Not Acceptable — Accept header does not match any supported media type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAcceptableError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/locations/{id}": {
+      "get": {
+        "operationId": "getLocationsByIdV1",
+        "summary": "Get a single location",
+        "description": "Returns one location by id. Responds with 404 when the id does not exist, or 403 when it belongs to a different MSP or a company the token cannot access. (Under a restricted-access token a non-existent id may surface as 403 rather than 404.)",
+        "tags": [
+          "Locations"
+        ],
+        "security": [
+          {
+            "BearerToken": [
+              "locationView"
+            ]
+          },
+          {
+            "HmacSignature": [
+              "locationView"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Location identifier.",
+              "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            },
+            "required": true,
+            "description": "Location identifier.",
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "i-understand-this-is-beta-and-may-change"
+              ],
+              "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+              "example": "i-understand-this-is-beta-and-may-change"
+            },
+            "required": true,
+            "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+            "name": "X-Acknowledgment",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Location"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — missing or invalid `X-Acknowledgment` beta header, or input validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing, invalid, or scheme-disabled credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — the token lacks a required scope, is not scoped to an MSP, or the requested resource is outside the token's tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found — no resource with the given id is visible to this token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "Not Acceptable — Accept header does not match any supported media type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAcceptableError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/usage": {
+      "get": {
+        "operationId": "getUsageV1",
+        "summary": "Get partner usage data",
+        "description": "Returns usage statistics for the authenticated partner.",
+        "tags": [
+          "Usage"
+        ],
+        "security": [
+          {
+            "BearerToken": [
+              "computerView"
+            ]
+          },
+          {
+            "HmacSignature": [
+              "computerView"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "i-understand-this-is-beta-and-may-change"
+              ],
+              "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+              "example": "i-understand-this-is-beta-and-may-change"
+            },
+            "required": true,
+            "description": "Beta acknowledgment. Must be sent verbatim on every request. The Partner API is in beta and may change without notice; this header is your explicit acknowledgment of that.",
+            "name": "X-Acknowledgment",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request — missing or invalid `X-Acknowledgment` beta header, or input validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing, invalid, or scheme-disabled credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — the token lacks a required scope, is not scoped to an MSP, or the requested resource is outside the token's tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "Not Acceptable — Accept header does not match any supported media type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotAcceptableError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {},
+  "x-scalar-watch-mode": false,
+  "x-scalar-order": [
+    "autoelevate-partner-api-beta/description/introduction",
+    "autoelevate-partner-api-beta/tag/audit-logs",
+    "autoelevate-partner-api-beta/tag/companies",
+    "autoelevate-partner-api-beta/tag/computers",
+    "autoelevate-partner-api-beta/tag/elevated-sessions",
+    "autoelevate-partner-api-beta/tag/elevation-events",
+    "autoelevate-partner-api-beta/tag/elevation-requests",
+    "autoelevate-partner-api-beta/tag/elevation-rules",
+    "autoelevate-partner-api-beta/tag/locations",
+    "autoelevate-partner-api-beta/tag/usage",
+    "autoelevate-partner-api-beta/models"
+  ]
+}
