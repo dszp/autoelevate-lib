@@ -162,11 +162,29 @@ The OpenAPI document this library was written against is vendored in
 [Partner API reference](https://partner-api-docs.autoelevate.com/)). Types are hand-written
 from it, not generated.
 
-## Related
+## Resources
 
-`n8n-nodes-autoelevate` exposes the same surface as an n8n community node. It vendors its own
-copy of the transport because verified community nodes cannot carry runtime dependencies;
-this repository's `src/auth.ts` is the reference implementation of the signing algorithm.
+- [AutoElevate Partner API reference](https://partner-api-docs.autoelevate.com/): endpoints,
+  versioning, rate limits, and the OpenAPI document.
+- [CyberFOX support: AutoElevate Partner API (Beta)](https://support.cyberfox.com/360000239832-General-Troubleshooting/autoelevate-partner-api-beta):
+  creating service users and API keys, and troubleshooting 401/403 responses.
+- [Cloudflare Workers documentation](https://developers.cloudflare.com/workers/) for the
+  runtime this library targets first.
+- [`n8n-nodes-autoelevate`](https://github.com/dszp/n8n-nodes-autoelevate): the same surface as
+  an n8n community node. It vendors its own copy of the transport because verified community
+  nodes cannot carry runtime dependencies; this repository's `src/auth.ts` is the reference
+  implementation of the signing algorithm.
+- [ARCHITECTURE.md](ARCHITECTURE.md) for why the library is shaped this way, and
+  [CONTRIBUTING.md](CONTRIBUTING.md) for the rules.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
+
+## Attribution
+
+AutoElevate is a product of CyberFOX, which owns the AutoElevate trademarks. This library is not
+affiliated with or endorsed by CyberFOX.
 
 ## License
 
