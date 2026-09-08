@@ -1,6 +1,6 @@
 {
   "name": "@dszp/autoelevate-lib",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Portable, Node-free client for the AutoElevate Partner API (beta): read-only typed client, Bearer and HMAC signing, and a per-company active-agent count helper for billing reconciliation. Runs unchanged in a Cloudflare Worker, Node, or the browser.",
   "type": "module",
   "license": "MIT",
