@@ -179,6 +179,13 @@ AUTOELEVATE_TOKEN=aeb_... pnpm test
 AUTOELEVATE_TOKEN=aeh_... AUTOELEVATE_HMAC_KEY=... pnpm test
 ```
 
+The write live smoke test self-skips unless both `AUTOELEVATE_TOKEN` and
+`AUTOELEVATE_LIVE_DECIDED_REQUEST_ID` are set, and needs a `requestEdit`-scoped key:
+
+```bash
+AUTOELEVATE_TOKEN=... AUTOELEVATE_HMAC_KEY=... AUTOELEVATE_LIVE_DECIDED_REQUEST_ID=<id> pnpm test
+```
+
 The OpenAPI document this library was written against is vendored in
 `reference/AutoElevate Partner API Beta.json` (downloaded 2026-09-08 from the
 [Partner API reference](https://partner-api-docs.autoelevate.com/)). Types are hand-written

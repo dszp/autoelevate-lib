@@ -1,5 +1,5 @@
 /**
- * @dszp/autoelevate-lib — read-only client for the AutoElevate Partner API (beta).
+ * @dszp/autoelevate-lib — read client and explicit write client for the AutoElevate Partner API (beta).
  *
  * The raw transport (`AutoElevateHttp`) is intentionally not exported; see `http.ts`.
  */

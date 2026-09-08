@@ -17,11 +17,12 @@ Why this library is shaped the way it is. For the rules of contributing, see
 | `testkit.ts` | Recording mock `fetch` that rejects a missing acknowledgment header with the API's own 400. **Excluded from the build.** | dev |
 | `*.test.ts` | vitest units; `readClient.live.test.ts` is env-gated. **Excluded from the build.** | dev |
 
-## The read-only guarantee is encapsulation
+## The read/write split is encapsulation
 
-The Partner API has two write endpoints, both `POST`. The read client never issues anything but
-`GET`, and it is the only thing that can reach `AutoElevateHttp`. The write client is the only
-sanctioned way in, it is a separate import, and both clients hold their own private transport.
+The Partner API has two write endpoints, both `POST`. `AutoElevateHttp` is not exported; each
+client constructs and holds its own instance privately, so neither can reach the other's
+transport. The read client issues only `GET` and has no mutating method. The write client is the
+single sanctioned write path, and it is a separate import.
 
 ## Signing
 

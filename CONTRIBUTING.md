@@ -16,7 +16,9 @@ pnpm verify        # builds, then imports dist/index.js under Node
 ```
 
 `pnpm test` must be green on a fresh clone with nothing configured. The live smoke test,
-`src/readClient.live.test.ts`, self-skips unless `AUTOELEVATE_TOKEN` is set.
+`src/readClient.live.test.ts`, self-skips unless `AUTOELEVATE_TOKEN` is set. The write live smoke
+test, `src/writeClient.live.test.ts`, self-skips unless both `AUTOELEVATE_TOKEN` and
+`AUTOELEVATE_LIVE_DECIDED_REQUEST_ID` are set, and needs a `requestEdit`-scoped key.
 
 ## The rules
 
