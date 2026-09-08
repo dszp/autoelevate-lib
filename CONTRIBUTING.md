@@ -29,10 +29,10 @@ pnpm verify        # builds, then imports dist/index.js under Node
 
 ### 2. The transport stays private
 
-`AutoElevateHttp` is not exported from `src/index.ts`. The read-only guarantee of
-`AutoElevateReadClient` is encapsulation: it has no mutating method, and nobody outside the
-package can reach the request primitive underneath it. If a write client is ever added, it gets
-its own class and its own explicit opt-in; the read client does not grow verbs.
+`AutoElevateHttp` is not exported from `src/index.ts`. Reads live on `AutoElevateReadClient`,
+writes on `AutoElevateWriteClient`; each holds its own transport privately, so nobody outside the
+package can reach the request primitive underneath either one. A new verb goes on the class that
+matches its HTTP method, never across.
 
 ### 3. Fixtures and examples are fictional
 

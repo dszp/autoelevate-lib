@@ -7,6 +7,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `AutoElevateWriteClient` with `approveElevationRequest` and `denyElevationRequest` (`requestEdit`
+  scope), client-side payload validation (`AutoElevateValidationError`), and a 409 hint.
+- `post()` on the private transport; the JSON body is serialised once and the same bytes are hashed
+  for HMAC and sent.
+
 ## [0.1.1] — 2026-09-08
 
 ### Changed
