@@ -66,9 +66,11 @@ export default {
 };
 ```
 
-For an HMAC key, pass `{ scheme: 'hmac', token, hmacKey }` instead. The signature covers the
-method, the full URL including query string, a SHA-256 of the body, and a millisecond
-timestamp; the server rejects timestamps more than five minutes from its own clock.
+For an HMAC key, pass `{ scheme: 'hmac', token, hmacKey }` instead, with `hmacKey` exactly as
+the portal showed it. The signature covers the method, the request-target (path and query
+string, without the host), a SHA-256 of the body, and a millisecond timestamp. The server
+rejects timestamps more than five minutes from its own clock. Verified against the live API
+on 2026-09-08: signing the absolute URL is rejected with `Invalid signature`.
 
 ## Billing counts
 

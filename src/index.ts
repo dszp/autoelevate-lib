@@ -11,6 +11,7 @@ export {
   signRequest,
   sha256Hex,
   hmacStringToSign,
+  requestTarget,
   HMAC_SCHEME,
   EMPTY_BODY_SHA256,
   ACKNOWLEDGMENT_HEADER,

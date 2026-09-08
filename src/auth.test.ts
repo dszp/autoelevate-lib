@@ -13,12 +13,12 @@ describe('signRequest', () => {
     expect(await sha256Hex('abc')).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
   });
 
-  it('string to sign uses real newlines, upper-cased method and the full URL with query', () => {
+  it('string to sign uses real newlines, upper-cased method and the request-target (path+query, no host)', () => {
     const s = hmacStringToSign('get', 'https://x/api/v1/computers?take=200&skip=0', EMPTY_BODY_SHA256, 1700000000000);
     expect(s.split('\n')).toEqual([
       'AE-HMAC-SHA256',
       'GET',
-      'https://x/api/v1/computers?take=200&skip=0',
+      '/api/v1/computers?take=200&skip=0',
       EMPTY_BODY_SHA256,
       '1700000000000',
     ]);
@@ -41,6 +41,15 @@ describe('signRequest', () => {
     const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode('what do ya want for nothing?'));
     const hex = Array.from(new Uint8Array(sig), (b) => b.toString(16).padStart(2, '0')).join('');
     expect(hex).toBe('5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843');
+  });
+
+  it('an absolute URL and its request-target sign identically; a different host does not matter', async () => {
+    const t = () => 1700000000000;
+    const a = await signRequest(TEST_HMAC, 'GET', 'https://partner-api.autoelevate.com/api/v1/usage?x=1', undefined, t);
+    const b = await signRequest(TEST_HMAC, 'GET', '/api/v1/usage?x=1', undefined, t);
+    const c = await signRequest(TEST_HMAC, 'GET', 'https://other.example/api/v1/usage?x=1', undefined, t);
+    expect(a).toBe(b);
+    expect(a).toBe(c);
   });
 
   it('hmac: a different body or URL changes the signature', async () => {

@@ -18,7 +18,10 @@ export interface HmacCredential {
   scheme: 'hmac';
   /** The `aeh_…` identifier sent as `token=` on every request. */
   token: string;
-  /** The signing key. Never transmitted. */
+  /**
+   * The signing key, exactly as the portal displayed it (a 64-character hex string). It is used as
+   * raw UTF-8 bytes — not hex-decoded — which is what the server does. Never transmitted.
+   */
   hmacKey: string;
 }
 
@@ -48,16 +51,30 @@ export async function sha256Hex(text: string): Promise<string> {
 }
 
 /**
- * The canonical string the HMAC scheme signs. Lines are joined with a real newline. `url` is the
- * full request target including query string; `method` is upper-cased here so callers need not.
+ * The canonical string the HMAC scheme signs. Lines are joined with a real newline.
+ *
+ * `target` is the HTTP request-target: the **path plus query string, without scheme or host**
+ * (`/api/v1/computers?take=200`). The docs call this "the full URL"; verified live 2026-09-08 that
+ * the absolute URL is rejected with `Invalid signature` and the request-target is accepted. Pass
+ * an absolute URL and it is reduced to its request-target here so both forms sign identically.
  */
-export function hmacStringToSign(method: string, url: string, bodyHash: string, ts: number): string {
-  return [HMAC_SCHEME, method.toUpperCase(), url, bodyHash, String(ts)].join('\n');
+export function hmacStringToSign(method: string, target: string, bodyHash: string, ts: number): string {
+  return [HMAC_SCHEME, method.toUpperCase(), requestTarget(target), bodyHash, String(ts)].join('\n');
+}
+
+/** Reduce an absolute URL to its request-target; a relative target passes through unchanged. */
+export function requestTarget(url: string): string {
+  if (/^https?:\/\//i.test(url)) {
+    const u = new URL(url);
+    return u.pathname + u.search;
+  }
+  return url;
 }
 
 /**
  * Build the `Authorization` header value for one request.
  *
+ * @param url  Absolute URL or request-target; only the path and query are signed.
  * @param body The exact body string that will be sent, or `undefined`/`''` for none. The hash is
  *             over these bytes, so serialise once and pass the same string to `fetch`.
  * @param nowMs Injectable clock; the server rejects `ts` more than 5 minutes from its own time.
