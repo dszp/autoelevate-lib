@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { AutoElevateApiError, AutoElevateHttp } from './http.js';
-import { ACKNOWLEDGMENT_HEADER, ACKNOWLEDGMENT_VALUE } from './auth.js';
+import { ACKNOWLEDGMENT_HEADER, ACKNOWLEDGMENT_VALUE, EMPTY_BODY_SHA256, sha256Hex } from './auth.js';
 import { mockFetch, TEST_BEARER, TEST_HMAC } from './testkit.js';
 
 describe('AutoElevateHttp', () => {
@@ -71,5 +71,40 @@ describe('AutoElevateHttp', () => {
       sunset: 'Sat, 01 Jan 2028 00:00:00 GMT',
       successor: '</api/v2/usage>; rel="successor-version"',
     });
+  });
+});
+
+describe('AutoElevateHttp.post', () => {
+  it('sends a JSON body once and signs the same bytes', async () => {
+    const f = mockFetch({ responses: [{ body: { id: 'req-0000', approvalState: 'APPROVED' } }] });
+    const http = new AutoElevateHttp({ credential: TEST_HMAC, fetchImpl: f.fetchImpl, nowMs: () => 1700000000000 });
+    const res = await http.post('/elevation-requests/req-0000/approve', { elevationType: 'admin' });
+    expect(res.body).toEqual({ id: 'req-0000', approvalState: 'APPROVED' });
+    const call = f.calls[0]!;
+    expect(call.method).toBe('POST');
+    expect(call.headers['Content-Type']).toBe('application/json');
+    expect(call.body).toBe('{"elevationType":"admin"}');
+    const expectedHash = await sha256Hex('{"elevationType":"admin"}');
+    expect(call.headers.Authorization).toContain(`bodyHash=${expectedHash}`);
+    expect(call.headers.Authorization).not.toContain(EMPTY_BODY_SHA256);
+  });
+
+  it('sends "{}" for an empty payload rather than no body', async () => {
+    const f = mockFetch({ responses: [{ body: {} }] });
+    const http = new AutoElevateHttp({ credential: TEST_BEARER, fetchImpl: f.fetchImpl });
+    await http.post('/elevation-requests/req-0000/deny', {});
+    expect(f.calls[0]!.body).toBe('{}');
+  });
+
+  it('409 carries the state-transition hint', async () => {
+    const f = mockFetch({
+      responses: [{ status: 409, body: { name: 'ConflictError', message: 'Request is not pending', statusCode: 409 } }],
+    });
+    const http = new AutoElevateHttp({ credential: TEST_BEARER, fetchImpl: f.fetchImpl });
+    const err = await http.post('/elevation-requests/req-0000/approve', {}).catch((e) => e);
+    expect(err).toBeInstanceOf(AutoElevateApiError);
+    expect(err.status).toBe(409);
+    expect(err.message).toMatch(/not pending/i);
+    expect(err.message).toMatch(/PENDING/);
   });
 });
