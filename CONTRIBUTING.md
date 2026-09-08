@@ -32,9 +32,10 @@ test, `src/writeClient.live.test.ts`, self-skips unless both `AUTOELEVATE_TOKEN`
 ### 2. The transport stays private
 
 `AutoElevateHttp` is not exported from `src/index.ts`. Reads live on `AutoElevateReadClient`,
-writes on `AutoElevateWriteClient`; each holds its own transport privately, so nobody outside the
-package can reach the request primitive underneath either one. A new verb goes on the class that
-matches its HTTP method, never across.
+writes on `AutoElevateWriteClient`; each holds it in an ES `#private` field (not a TypeScript
+`private`, which is compile-time only), so neither TypeScript nor plain JavaScript can reach the
+request primitive from outside the package. A new verb goes on the class that matches its HTTP
+method, never across.
 
 ### 3. Fixtures and examples are fictional
 

@@ -79,9 +79,47 @@ describe('AutoElevateReadClient', () => {
     expect(f.calls[1]!.target).toBe('/api/v1/audit-logs?entityType=users&cursor=abc&take=200');
   });
 
-  it('has no write methods (approve/deny are deliberately absent)', () => {
-    const names = Object.getOwnPropertyNames(AutoElevateReadClient.prototype);
-    expect(names.some((n) => /approve|deny|create|update|delete|post/i.test(n))).toBe(false);
+  it('read client: transport is unreachable at runtime, not just in types', () => {
+    const r = new AutoElevateReadClient({ credential: TEST_BEARER });
+    expect(Object.keys(r)).toEqual([]);
+    expect((r as unknown as Record<string, unknown>).http).toBeUndefined();
+  });
+
+  it('read client: exposes exactly the 21 documented read methods (plus the `walk` internal)', () => {
+    // TypeScript's `private` on `walk` is compile-time only — it is a plain method on the
+    // prototype at runtime, callable from any consumer's JS. That is exactly why this inventory
+    // is exact rather than pattern-matched: a regex over method names could miss it, but an
+    // exhaustive list can't. If a future change makes `walk` an ES `#private` method (as the
+    // transport field now is), remove it from this list when it happens.
+    const expected = [
+      'getUsage',
+      'listCompanies',
+      'listAllCompanies',
+      'getCompany',
+      'listComputers',
+      'listAllComputers',
+      'getComputer',
+      'listLocations',
+      'listAllLocations',
+      'getLocation',
+      'listElevationRequests',
+      'listAllElevationRequests',
+      'getElevationRequest',
+      'listElevationEvents',
+      'listAllElevationEvents',
+      'listElevatedSessions',
+      'listAllElevatedSessions',
+      'getElevatedSession',
+      'listElevationRules',
+      'listAllElevationRules',
+      'listAuditLogs',
+      'listAllAuditLogs',
+      'walk',
+    ].sort();
+    const actual = Object.getOwnPropertyNames(AutoElevateReadClient.prototype)
+      .filter((n) => n !== 'constructor')
+      .sort();
+    expect(actual).toEqual(expected);
   });
 
   it('barrel exports the write client but not the transport', () => {

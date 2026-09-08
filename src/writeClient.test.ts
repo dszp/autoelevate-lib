@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { AutoElevateWriteClient, AutoElevateValidationError } from './writeClient.js';
-import { mockFetch, TEST_HMAC } from './testkit.js';
+import { mockFetch, TEST_HMAC, TEST_BEARER } from './testkit.js';
 
 const approved = { id: 'req-0000', computerId: 'm', approvalState: 'APPROVED', requestedBy: null, targetDescription: null, createdAt: 1 };
 
@@ -54,5 +54,35 @@ describe('AutoElevateWriteClient', () => {
   it('has exactly the two write methods', () => {
     const names = Object.getOwnPropertyNames(AutoElevateWriteClient.prototype).filter((n) => n !== 'constructor');
     expect(names.sort()).toEqual(['approveElevationRequest', 'denyElevationRequest']);
+  });
+
+  it('write client: transport is unreachable at runtime, not just in types', () => {
+    const w = new AutoElevateWriteClient({ credential: TEST_BEARER });
+    expect(Object.keys(w)).toEqual([]);
+    expect((w as unknown as Record<string, unknown>).http).toBeUndefined();
+  });
+
+  it('rejects an out-of-enum ruleLevel on approve before any request', async () => {
+    const f = mockFetch();
+    await expect(
+      client(f).approveElevationRequest('req-0000', { ruleLevel: 'planet' as never }),
+    ).rejects.toBeInstanceOf(AutoElevateValidationError);
+    expect(f.calls).toHaveLength(0);
+  });
+
+  it('rejects an out-of-enum ruleLevel on deny before any request', async () => {
+    const f = mockFetch();
+    await expect(
+      client(f).denyElevationRequest('req-0000', { ruleLevel: 'planet' as never }),
+    ).rejects.toBeInstanceOf(AutoElevateValidationError);
+    expect(f.calls).toHaveLength(0);
+  });
+
+  it('rejects an out-of-enum elevationType before any request', async () => {
+    const f = mockFetch();
+    await expect(
+      client(f).approveElevationRequest('req-0000', { elevationType: 'root' as never }),
+    ).rejects.toBeInstanceOf(AutoElevateValidationError);
+    expect(f.calls).toHaveLength(0);
   });
 });

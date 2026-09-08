@@ -57,34 +57,42 @@ export function validateApprovePayload(p: ApproveElevationRequestPayload): void 
 
 export function validateDenyPayload(p: DenyElevationRequestPayload): void {
   validateRule(p);
-  if (p.denialReason !== undefined && [...p.denialReason].length > DENIAL_REASON_MAX) {
+  // `.length` counts UTF-16 code units, matching a JavaScript server-side validator (`string.length`,
+  // not `Array.from(string).length`). That undercounts a handful of characters outside the BMP
+  // (surrogate pairs count as 2), so this errs toward rejecting locally rather than passing a
+  // borderline value through to a 400 from the API.
+  if (p.denialReason !== undefined && p.denialReason.length > DENIAL_REASON_MAX) {
     throw new AutoElevateValidationError('denialReason', `denialReason must be at most ${DENIAL_REASON_MAX} characters.`);
   }
 }
 
-/** Drop `undefined` values so the wire body contains only what the caller set. */
+/**
+ * `JSON.stringify` already drops keys whose value is `undefined`, so this makes no difference to
+ * the wire body. It exists as belt-and-braces: the payload object itself is clean for any caller
+ * who inspects it (e.g. before it's serialised) rather than only for the request that goes out.
+ */
 function compact<T extends object>(p: T): T {
   return Object.fromEntries(Object.entries(p).filter(([, v]) => v !== undefined)) as T;
 }
 
 export class AutoElevateWriteClient {
-  private readonly http: AutoElevateHttp;
+  readonly #http: AutoElevateHttp;
 
   constructor(config: AutoElevateWriteClientConfig) {
-    this.http = new AutoElevateHttp(config);
+    this.#http = new AutoElevateHttp(config);
   }
 
   /** Scope: `requestEdit`. The request must be `PENDING`; otherwise the API returns 409. */
   async approveElevationRequest(id: string, payload: ApproveElevationRequestPayload = {}): Promise<ElevationRequest> {
     const rid = requireId(id);
     validateApprovePayload(payload);
-    return (await this.http.post<ElevationRequest>(`/elevation-requests/${encodeURIComponent(rid)}/approve`, compact(payload))).body;
+    return (await this.#http.post<ElevationRequest>(`/elevation-requests/${encodeURIComponent(rid)}/approve`, compact(payload))).body;
   }
 
   /** Scope: `requestEdit`. The request must be `PENDING`; otherwise the API returns 409. */
   async denyElevationRequest(id: string, payload: DenyElevationRequestPayload = {}): Promise<ElevationRequest> {
     const rid = requireId(id);
     validateDenyPayload(payload);
-    return (await this.http.post<ElevationRequest>(`/elevation-requests/${encodeURIComponent(rid)}/deny`, compact(payload))).body;
+    return (await this.#http.post<ElevationRequest>(`/elevation-requests/${encodeURIComponent(rid)}/deny`, compact(payload))).body;
   }
 }

@@ -60,24 +60,24 @@ export type AutoElevateReadClientConfig = AutoElevateHttpConfig;
  * key without the `requestEdit` scope and the API enforces the same boundary server-side.
  */
 export class AutoElevateReadClient {
-  private readonly http: AutoElevateHttp;
+  readonly #http: AutoElevateHttp;
 
   constructor(config: AutoElevateReadClientConfig) {
-    this.http = new AutoElevateHttp(config);
+    this.#http = new AutoElevateHttp(config);
   }
 
   // ---- usage ----------------------------------------------------------------------------
 
   /** MSP-wide usage snapshot. Scope: `computerView`. */
   async getUsage(): Promise<UsageResponse> {
-    return (await this.http.get<UsageResponse>('/usage')).body;
+    return (await this.#http.get<UsageResponse>('/usage')).body;
   }
 
   // ---- companies ------------------------------------------------------------------------
 
   /** Scope: `companyView`. A restricted key sees only its permitted companies. */
   async listCompanies(opts: PageOptions = {}): Promise<Page<Company>> {
-    return (await this.http.get<Page<Company>>('/companies', pageQuery(opts))).body;
+    return (await this.#http.get<Page<Company>>('/companies', pageQuery(opts))).body;
   }
 
   async listAllCompanies(opts: WalkOptions = {}): Promise<Company[]> {
@@ -85,7 +85,7 @@ export class AutoElevateReadClient {
   }
 
   async getCompany(id: string): Promise<Company> {
-    return (await this.http.get<Company>(`/companies/${encodeURIComponent(id)}`)).body;
+    return (await this.#http.get<Company>(`/companies/${encodeURIComponent(id)}`)).body;
   }
 
   // ---- computers ------------------------------------------------------------------------
@@ -96,7 +96,7 @@ export class AutoElevateReadClient {
    */
   async listComputers(opts: ListComputersOptions = {}): Promise<Page<Computer>> {
     const { companyId, locationId, ...page } = opts;
-    return (await this.http.get<Page<Computer>>('/computers', { ...pageQuery(page), companyId, locationId })).body;
+    return (await this.#http.get<Page<Computer>>('/computers', { ...pageQuery(page), companyId, locationId })).body;
   }
 
   async listAllComputers(opts: Omit<ListComputersOptions, keyof PageOptions> & WalkOptions = {}): Promise<Computer[]> {
@@ -105,7 +105,7 @@ export class AutoElevateReadClient {
   }
 
   async getComputer(id: string): Promise<Computer> {
-    return (await this.http.get<Computer>(`/computers/${encodeURIComponent(id)}`)).body;
+    return (await this.#http.get<Computer>(`/computers/${encodeURIComponent(id)}`)).body;
   }
 
   // ---- locations ------------------------------------------------------------------------
@@ -113,7 +113,7 @@ export class AutoElevateReadClient {
   /** Scope: `locationView`. */
   async listLocations(opts: ListLocationsOptions = {}): Promise<Page<Location>> {
     const { companyId, ...page } = opts;
-    return (await this.http.get<Page<Location>>('/locations', { ...pageQuery(page), companyId })).body;
+    return (await this.#http.get<Page<Location>>('/locations', { ...pageQuery(page), companyId })).body;
   }
 
   async listAllLocations(opts: Omit<ListLocationsOptions, keyof PageOptions> & WalkOptions = {}): Promise<Location[]> {
@@ -122,7 +122,7 @@ export class AutoElevateReadClient {
   }
 
   async getLocation(id: string): Promise<Location> {
-    return (await this.http.get<Location>(`/locations/${encodeURIComponent(id)}`)).body;
+    return (await this.#http.get<Location>(`/locations/${encodeURIComponent(id)}`)).body;
   }
 
   // ---- elevation requests ---------------------------------------------------------------
@@ -131,7 +131,7 @@ export class AutoElevateReadClient {
   async listElevationRequests(opts: ListElevationRequestsOptions = {}): Promise<Page<ElevationRequest>> {
     const { companyId, approvalState, start, end, ...page } = opts;
     return (
-      await this.http.get<Page<ElevationRequest>>('/elevation-requests', {
+      await this.#http.get<Page<ElevationRequest>>('/elevation-requests', {
         ...pageQuery(page),
         companyId,
         approvalState,
@@ -149,7 +149,7 @@ export class AutoElevateReadClient {
   }
 
   async getElevationRequest(id: string): Promise<ElevationRequest> {
-    return (await this.http.get<ElevationRequest>(`/elevation-requests/${encodeURIComponent(id)}`)).body;
+    return (await this.#http.get<ElevationRequest>(`/elevation-requests/${encodeURIComponent(id)}`)).body;
   }
 
   // ---- elevation events -----------------------------------------------------------------
@@ -157,7 +157,7 @@ export class AutoElevateReadClient {
   /** Scope: `eventView`. */
   async listElevationEvents(opts: ListElevationEventsOptions = {}): Promise<Page<ElevationEvent>> {
     const { companyId, start, end, ...page } = opts;
-    return (await this.http.get<Page<ElevationEvent>>('/elevation-events', { ...pageQuery(page), companyId, start, end }))
+    return (await this.#http.get<Page<ElevationEvent>>('/elevation-events', { ...pageQuery(page), companyId, start, end }))
       .body;
   }
 
@@ -174,7 +174,7 @@ export class AutoElevateReadClient {
   async listElevatedSessions(opts: ListElevatedSessionsOptions = {}): Promise<Page<ElevatedSession>> {
     const { companyId, computerId, status, ...page } = opts;
     return (
-      await this.http.get<Page<ElevatedSession>>('/elevated-sessions', { ...pageQuery(page), companyId, computerId, status })
+      await this.#http.get<Page<ElevatedSession>>('/elevated-sessions', { ...pageQuery(page), companyId, computerId, status })
     ).body;
   }
 
@@ -186,7 +186,7 @@ export class AutoElevateReadClient {
   }
 
   async getElevatedSession(id: string): Promise<ElevatedSession> {
-    return (await this.http.get<ElevatedSession>(`/elevated-sessions/${encodeURIComponent(id)}`)).body;
+    return (await this.#http.get<ElevatedSession>(`/elevated-sessions/${encodeURIComponent(id)}`)).body;
   }
 
   // ---- elevation rules ------------------------------------------------------------------
@@ -194,7 +194,7 @@ export class AutoElevateReadClient {
   /** Scope: `ruleView`. */
   async listElevationRules(opts: ListElevationRulesOptions = {}): Promise<Page<ElevationRule>> {
     const { companyId, ...page } = opts;
-    return (await this.http.get<Page<ElevationRule>>('/elevation-rules', { ...pageQuery(page), companyId })).body;
+    return (await this.#http.get<Page<ElevationRule>>('/elevation-rules', { ...pageQuery(page), companyId })).body;
   }
 
   async listAllElevationRules(
@@ -208,7 +208,7 @@ export class AutoElevateReadClient {
 
   /** Scope: `auditLogView`. May 403 for tenants outside the audit-log Early Access. */
   async listAuditLogs(opts: ListAuditLogsOptions = {}): Promise<CursorPage<AuditLogEntry>> {
-    return (await this.http.get<CursorPage<AuditLogEntry>>('/audit-logs', { ...opts, take: opts.take ?? MAX_PAGE_SIZE }))
+    return (await this.#http.get<CursorPage<AuditLogEntry>>('/audit-logs', { ...opts, take: opts.take ?? MAX_PAGE_SIZE }))
       .body;
   }
 
@@ -238,7 +238,7 @@ export class AutoElevateReadClient {
     const out: T[] = [];
     let expected: number | undefined;
     for (let page = 0; page < maxPages; page++) {
-      const res: ApiResult<Page<T>> = await this.http.get<Page<T>>(path, {
+      const res: ApiResult<Page<T>> = await this.#http.get<Page<T>>(path, {
         ...filters,
         take: MAX_PAGE_SIZE,
         skip: page * MAX_PAGE_SIZE,

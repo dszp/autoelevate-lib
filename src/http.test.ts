@@ -107,4 +107,15 @@ describe('AutoElevateHttp.post', () => {
     expect(err.message).toMatch(/not pending/i);
     expect(err.message).toMatch(/PENDING/);
   });
+
+  it('409 on a non-elevation-requests path carries no hint', async () => {
+    const f = mockFetch({
+      responses: [{ status: 409, body: { name: 'ConflictError', message: 'Conflict', statusCode: 409 } }],
+    });
+    const http = new AutoElevateHttp({ credential: TEST_BEARER, fetchImpl: f.fetchImpl });
+    const err = await http.get('/computers').catch((e) => e);
+    expect(err).toBeInstanceOf(AutoElevateApiError);
+    expect(err.status).toBe(409);
+    expect(err.message).toBe('AutoElevate GET /api/v1/computers -> 409: Conflict');
+  });
 });

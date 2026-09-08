@@ -12,11 +12,14 @@ What you get:
   MSP-total cross-check against `/usage`.
 - `signRequest()`: builds the `Authorization` header for both key schemes (HMAC-SHA256 and
   Bearer), usable on its own from a script.
+- `AutoElevateWriteClient`: approve or deny a pending elevation request. Needs a key with the
+  `requestEdit` scope, and lives on a separate class from the read client so a read-only
+  integration can't grow a write by accident.
 
 This package splits reads from writes: `AutoElevateReadClient` covers every GET endpoint, and
 a separate `AutoElevateWriteClient` covers the two POST endpoints that approve or deny an
 elevation request. The write client needs an API key with the `requestEdit` scope — a key
-without it is refused by the API itself, not just by this library.
+without it is refused by the API itself; the library does not inspect scopes.
 
 > The Partner API is in beta and can change without notice. Every request carries the
 > required `X-Acknowledgment: i-understand-this-is-beta-and-may-change` header. The library

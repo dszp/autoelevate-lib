@@ -86,7 +86,9 @@ function hint(status: number, path: string): string {
     case 429:
       return 'Rate limited (100 requests/hour per method+route). Wait for Retry-After.';
     case 409:
-      return 'The request is not in a state that allows this transition (it must be PENDING).';
+      return path.includes('/elevation-requests/')
+        ? 'The request is not in a state that allows this transition (it must be PENDING).'
+        : '';
     default:
       return '';
   }
