@@ -8,14 +8,19 @@
 
 /** A key created with the AE-BEARER scheme: one secret, sent as-is. */
 export interface BearerCredential {
-  scheme: 'bearer';
+  scheme?: 'bearer';
   /** The `aeb_…` token shown once at creation. */
   token: string;
+  hmacKey?: undefined;
 }
 
-/** A key created with the AE-HMAC-SHA256 scheme: a wire token plus a separate signing key. */
+/**
+ * A key created with the AE-HMAC-SHA256 scheme: a wire token plus a separate signing key. This is
+ * the preferred scheme: the signature binds the method, target and body, so a captured request
+ * cannot be replayed against another endpoint or after the 5-minute window.
+ */
 export interface HmacCredential {
-  scheme: 'hmac';
+  scheme?: 'hmac';
   /** The `aeh_…` identifier sent as `token=` on every request. */
   token: string;
   /**
@@ -25,7 +30,26 @@ export interface HmacCredential {
   hmacKey: string;
 }
 
+/**
+ * Either scheme. `scheme` is optional: when omitted, the presence of `hmacKey` selects HMAC and its
+ * absence selects Bearer, so `{ token, hmacKey }` and `{ token }` both work without ceremony.
+ */
 export type Credential = BearerCredential | HmacCredential;
+
+/** Resolve the scheme and check it against the token prefix the portal issues (`aeh_` / `aeb_`). */
+export function resolveScheme(credential: Credential): 'bearer' | 'hmac' {
+  const scheme = credential.scheme ?? (credential.hmacKey ? 'hmac' : 'bearer');
+  if (scheme === 'hmac' && !credential.hmacKey) {
+    throw new Error('AutoElevate credential: scheme "hmac" requires hmacKey.');
+  }
+  if (scheme === 'hmac' && credential.token.startsWith('aeb_')) {
+    throw new Error('AutoElevate credential: an aeb_ token is a Bearer key; it has no HMAC signing key.');
+  }
+  if (scheme === 'bearer' && credential.token.startsWith('aeh_')) {
+    throw new Error('AutoElevate credential: an aeh_ token is an HMAC key; supply hmacKey so requests can be signed.');
+  }
+  return scheme;
+}
 
 /** The wire name of the HMAC scheme; also the first line of the string to sign. */
 export const HMAC_SCHEME = 'AE-HMAC-SHA256';
@@ -86,14 +110,14 @@ export async function signRequest(
   body?: string,
   nowMs: () => number = Date.now,
 ): Promise<string> {
-  if (credential.scheme === 'bearer') {
+  if (resolveScheme(credential) === 'bearer') {
     return `Bearer ${credential.token}`;
   }
   const ts = Math.floor(nowMs());
   const bodyHash = await sha256Hex(body ?? '');
   const key = await crypto.subtle.importKey(
     'raw',
-    encoder.encode(credential.hmacKey),
+    encoder.encode(credential.hmacKey!),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign'],

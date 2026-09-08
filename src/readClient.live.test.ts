@@ -19,9 +19,7 @@ const TOKEN = env.AUTOELEVATE_TOKEN;
 const HMAC_KEY = env.AUTOELEVATE_HMAC_KEY;
 
 describe.skipIf(!TOKEN)('live read smoke (real AutoElevate Partner API)', () => {
-  const credential: Credential = HMAC_KEY
-    ? { scheme: 'hmac', token: TOKEN!, hmacKey: HMAC_KEY }
-    : { scheme: 'bearer', token: TOKEN! };
+  const credential: Credential = { token: TOKEN!, hmacKey: HMAC_KEY }; // scheme inferred
   const client = new AutoElevateReadClient({ credential, baseUrl: env.AUTOELEVATE_BASE_URL });
 
   it('usage responds and per-company counts reconcile', async () => {

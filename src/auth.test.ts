@@ -1,6 +1,19 @@
 import { describe, it, expect } from 'vitest';
-import { EMPTY_BODY_SHA256, hmacStringToSign, sha256Hex, signRequest } from './auth.js';
+import { EMPTY_BODY_SHA256, hmacStringToSign, resolveScheme, sha256Hex, signRequest } from './auth.js';
 import { TEST_BEARER, TEST_HMAC } from './testkit.js';
+
+describe('resolveScheme', () => {
+  it('infers HMAC from the presence of hmacKey and Bearer from its absence', () => {
+    expect(resolveScheme({ token: 'aeh_x', hmacKey: 'k' })).toBe('hmac');
+    expect(resolveScheme({ token: 'aeb_x' })).toBe('bearer');
+    expect(resolveScheme({ token: 'opaque' })).toBe('bearer');
+  });
+  it('rejects a scheme that contradicts the token prefix or lacks the key', () => {
+    expect(() => resolveScheme({ scheme: 'hmac', token: 'aeh_x' } as any)).toThrow(/requires hmacKey/);
+    expect(() => resolveScheme({ token: 'aeb_x', hmacKey: 'k' })).toThrow(/Bearer key/);
+    expect(() => resolveScheme({ token: 'aeh_x' })).toThrow(/supply hmacKey/);
+  });
+});
 
 describe('signRequest', () => {
   it('bearer: emits the token verbatim', async () => {

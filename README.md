@@ -10,8 +10,8 @@ What you get:
   page at the API's maximum and verify the row count against the server's `totalCount`.
 - `gatherAgentCounts()`: per-company active-agent counts for billing reconciliation, with an
   MSP-total cross-check against `/usage`.
-- `signRequest()`: builds the `Authorization` header for both key schemes (Bearer and
-  HMAC-SHA256), usable on its own from an n8n HTTP node or a script.
+- `signRequest()`: builds the `Authorization` header for both key schemes (HMAC-SHA256 and
+  Bearer), usable on its own from a script.
 
 The two write endpoints (approve and deny an elevation request) are not implemented. Create
 the API key without the `requestEdit` scope and the API enforces the same boundary.
@@ -30,9 +30,10 @@ pnpm add @dszp/autoelevate-lib
 
 1. In the AutoElevate admin portal, open **Users** and create a **service user** for the
    integration. Do not attach keys to a person's account.
-2. In that user's **API Keys** section, add a key. Pick **API Token (AE-BEARER)** unless you
-   need request signing; **HMAC (AE-HMAC-SHA256)** shows two values, a wire `token` and a
-   separate `hmacKey`.
+2. In that user's **API Keys** section, add a key. Prefer **HMAC (AE-HMAC-SHA256)**: it shows
+   two values, a wire `token` (`aeh_…`) and a separate `hmacKey`, and every request is signed
+   so a captured request can't be replayed elsewhere or after five minutes. **API Token
+   (AE-BEARER)** gives one `aeb_…` secret and works with any HTTP client.
 3. Grant only the scopes you need (table below). Set the shortest expiry that fits.
 4. Copy the secret immediately. It is shown once.
 
@@ -56,9 +57,10 @@ Store the value in a secrets manager (Worker secret, 1Password, etc.), never in 
 import { AutoElevateReadClient, gatherAgentCounts } from '@dszp/autoelevate-lib';
 
 export default {
-  async fetch(_req: Request, env: { AUTOELEVATE_TOKEN: string }) {
+  async fetch(_req: Request, env: { AUTOELEVATE_TOKEN: string; AUTOELEVATE_HMAC_KEY?: string }) {
     const client = new AutoElevateReadClient({
-      credential: { scheme: 'bearer', token: env.AUTOELEVATE_TOKEN },
+      // HMAC when hmacKey is present, Bearer when it is not.
+      credential: { token: env.AUTOELEVATE_TOKEN, hmacKey: env.AUTOELEVATE_HMAC_KEY },
     });
     const report = await gatherAgentCounts(client);
     return Response.json(report);
@@ -66,8 +68,9 @@ export default {
 };
 ```
 
-For an HMAC key, pass `{ scheme: 'hmac', token, hmacKey }` instead, with `hmacKey` exactly as
-the portal showed it. The signature covers the method, the request-target (path and query
+Pass `hmacKey` exactly as the portal showed it. The scheme is inferred from its presence, and a
+token prefix that contradicts it (`aeb_` with a key, `aeh_` without) is rejected before any
+request is made; set `scheme` explicitly only if you want to be verbose. The signature covers the method, the request-target (path and query
 string, without the host), a SHA-256 of the body, and a millisecond timestamp. The server
 rejects timestamps more than five minutes from its own clock. Verified against the live API
 on 2026-09-08: signing the absolute URL is rejected with `Invalid signature`.

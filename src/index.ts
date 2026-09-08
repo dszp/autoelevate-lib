@@ -9,6 +9,7 @@ export { AutoElevateApiError, DEFAULT_BASE_URL, API_PREFIX } from './http.js';
 export type { DeprecationInfo } from './http.js';
 export {
   signRequest,
+  resolveScheme,
   sha256Hex,
   hmacStringToSign,
   requestTarget,
