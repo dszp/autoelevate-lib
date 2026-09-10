@@ -211,3 +211,27 @@ export interface ListAuditLogsOptions extends TimeRange {
   entityType?: AuditEntityType;
   action?: AuditAction;
 }
+
+// ---- write payloads ------------------------------------------------------------------------
+
+/** Body for `POST /elevation-requests/{id}/approve`. The request must be `PENDING`. */
+export interface ApproveElevationRequestPayload {
+  /** Overrides the elevation level recorded on the request. Defaults to the request's own. */
+  elevationType?: RuleElevationType;
+  /** Also create an auto-approval rule from this request. Requires `ruleLevel`. */
+  createRule?: boolean;
+  /** Scope of the auto-created rule. Required when `createRule` is `true`. */
+  ruleLevel?: RuleLevel;
+  /** Session length in minutes for elevated-session requests; ignored otherwise. Must be > 0. */
+  durationInMinutes?: number;
+}
+
+/** Body for `POST /elevation-requests/{id}/deny`. The request must be `PENDING`. */
+export interface DenyElevationRequestPayload {
+  /** Also create a denial rule from this request. Requires `ruleLevel`. */
+  createRule?: boolean;
+  /** Scope of the auto-created rule. Required when `createRule` is `true`. */
+  ruleLevel?: RuleLevel;
+  /** Plain text shown to the end user with the denial. Max 1000 characters. */
+  denialReason?: string;
+}

@@ -16,7 +16,9 @@ pnpm verify        # builds, then imports dist/index.js under Node
 ```
 
 `pnpm test` must be green on a fresh clone with nothing configured. The live smoke test,
-`src/readClient.live.test.ts`, self-skips unless `AUTOELEVATE_TOKEN` is set.
+`src/readClient.live.test.ts`, self-skips unless `AUTOELEVATE_TOKEN` is set. The write live smoke
+test, `src/writeClient.live.test.ts`, self-skips unless both `AUTOELEVATE_TOKEN` and
+`AUTOELEVATE_LIVE_DECIDED_REQUEST_ID` are set, and needs a `requestEdit`-scoped key.
 
 ## The rules
 
@@ -29,10 +31,11 @@ pnpm verify        # builds, then imports dist/index.js under Node
 
 ### 2. The transport stays private
 
-`AutoElevateHttp` is not exported from `src/index.ts`. The read-only guarantee of
-`AutoElevateReadClient` is encapsulation: it has no mutating method, and nobody outside the
-package can reach the request primitive underneath it. If a write client is ever added, it gets
-its own class and its own explicit opt-in; the read client does not grow verbs.
+`AutoElevateHttp` is not exported from `src/index.ts`. Reads live on `AutoElevateReadClient`,
+writes on `AutoElevateWriteClient`; each holds it in an ES `#private` field (not a TypeScript
+`private`, which is compile-time only), so neither TypeScript nor plain JavaScript can reach the
+request primitive from outside the package. A new verb goes on the class that matches its HTTP
+method, never across.
 
 ### 3. Fixtures and examples are fictional
 

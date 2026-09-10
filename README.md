@@ -1,6 +1,6 @@
 # @dszp/autoelevate-lib
 
-Read-only TypeScript client for the [AutoElevate Partner API (beta)](https://partner-api-docs.autoelevate.com/).
+TypeScript client for the [AutoElevate Partner API (beta)](https://partner-api-docs.autoelevate.com/).
 It runs unchanged in a Cloudflare Worker, Node 20+, or the browser: no Node built-ins, only
 `fetch` and WebCrypto.
 
@@ -12,9 +12,14 @@ What you get:
   MSP-total cross-check against `/usage`.
 - `signRequest()`: builds the `Authorization` header for both key schemes (HMAC-SHA256 and
   Bearer), usable on its own from a script.
+- `AutoElevateWriteClient`: approve or deny a pending elevation request. Needs a key with the
+  `requestEdit` scope, and lives on a separate class from the read client so a read-only
+  integration can't grow a write by accident.
 
-The two write endpoints (approve and deny an elevation request) are not implemented. Create
-the API key without the `requestEdit` scope and the API enforces the same boundary.
+This package splits reads from writes: `AutoElevateReadClient` covers every GET endpoint, and
+a separate `AutoElevateWriteClient` covers the two POST endpoints that approve or deny an
+elevation request. The write client needs an API key with the `requestEdit` scope — a key
+without it is refused by the API itself; the library does not inspect scopes.
 
 > The Partner API is in beta and can change without notice. Every request carries the
 > required `X-Acknowledgment: i-understand-this-is-beta-and-may-change` header. The library
@@ -50,6 +55,7 @@ Store the value in a secrets manager (Worker secret, 1Password, etc.), never in 
 | `listElevationRules` | `ruleView` |
 | `listAuditLogs` | `auditLogView` (may also require Early Access enrolment) |
 | `gatherAgentCounts` | `computerView` + `companyView` |
+| `approveElevationRequest`, `denyElevationRequest` | `requestEdit` |
 
 ## Use it in a Worker
 
@@ -111,6 +117,25 @@ How it works, and why:
 
 `bucketAgents(companies, computers)` is exported separately if you already have the rows.
 
+## Approving or denying elevation requests
+
+Writes live in a separate class so a read-only integration cannot grow a write by accident.
+The key needs the `requestEdit` scope; the request must be `PENDING`, otherwise the API
+answers `409` and nothing changes.
+
+```ts
+import { AutoElevateWriteClient } from '@dszp/autoelevate-lib';
+
+const writer = new AutoElevateWriteClient({ credential: { token, hmacKey } });
+await writer.approveElevationRequest(requestId, { elevationType: 'admin', durationInMinutes: 30 });
+await writer.denyElevationRequest(requestId, { denialReason: 'Not on the approved software list.' });
+```
+
+Options: `createRule: true` with a `ruleLevel` (`computer`, `location`, `company`, `msp`) also
+creates an auto-approve or auto-deny rule from the request. Payloads are validated before the
+request is sent (`AutoElevateValidationError` names the field), so a malformed call never spends
+a request from the hourly bucket.
+
 ## Pagination and completeness
 
 Offset lists (`take`/`skip`) return `{ items, totalCount }`. The API reports `totalCount: 0`
@@ -155,6 +180,13 @@ handful of requests from the hourly buckets:
 AUTOELEVATE_TOKEN=aeb_... pnpm test
 # HMAC instead:
 AUTOELEVATE_TOKEN=aeh_... AUTOELEVATE_HMAC_KEY=... pnpm test
+```
+
+The write live smoke test self-skips unless both `AUTOELEVATE_TOKEN` and
+`AUTOELEVATE_LIVE_DECIDED_REQUEST_ID` are set, and needs a `requestEdit`-scoped key:
+
+```bash
+AUTOELEVATE_TOKEN=... AUTOELEVATE_HMAC_KEY=... AUTOELEVATE_LIVE_DECIDED_REQUEST_ID=<id> pnpm test
 ```
 
 The OpenAPI document this library was written against is vendored in

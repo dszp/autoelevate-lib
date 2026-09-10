@@ -11,17 +11,18 @@ Why this library is shaped the way it is. For the rules of contributing, see
 | `auth.ts` | `Credential` shapes, `resolveScheme`, `signRequest`, the HMAC canonical string, the beta acknowledgment constants. Pure functions over WebCrypto. | ✅ |
 | `http.ts` | `AutoElevateHttp` transport and `AutoElevateApiError`. The one choke point. **Not exported.** | ✅ |
 | `readClient.ts` | `AutoElevateReadClient`: one method per GET endpoint plus `listAll*` walkers and `IncompleteListError`. Holds the transport privately. | ✅ |
+| `writeClient.ts` | `AutoElevateWriteClient`: `approveElevationRequest` and `denyElevationRequest`, with client-side payload validation (`AutoElevateValidationError`) before the request is sent. Holds its own transport privately. | ✅ |
 | `counts.ts` | `gatherAgentCounts` and the pure `bucketAgents`: per-company active-agent counts. | ✅ |
 | `index.ts` | Public barrel: everything above except `AutoElevateHttp`. | ✅ |
 | `testkit.ts` | Recording mock `fetch` that rejects a missing acknowledgment header with the API's own 400. **Excluded from the build.** | dev |
 | `*.test.ts` | vitest units; `readClient.live.test.ts` is env-gated. **Excluded from the build.** | dev |
 
-## The read-only guarantee is encapsulation
+## The read/write split is encapsulation
 
-The Partner API has two write endpoints, both `POST`. The read client never issues anything but
-`GET`, and it is the only thing that can reach `AutoElevateHttp`. A consumer who wants approve or
-deny has to build a transport of their own, which is the level of intent a write should require.
-Pair that with a key created without the `requestEdit` scope and the boundary holds on both ends.
+The Partner API has two write endpoints, both `POST`. `AutoElevateHttp` is not exported; each
+client constructs and holds its own instance privately, so neither can reach the other's
+transport. The read client issues only `GET` and has no mutating method. The write client is the
+single sanctioned write path, and it is a separate import.
 
 ## Signing
 

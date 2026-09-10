@@ -85,6 +85,10 @@ function hint(status: number, path: string): string {
         : 'The key lacks the scope this endpoint requires (see the route table in the README).';
     case 429:
       return 'Rate limited (100 requests/hour per method+route). Wait for Retry-After.';
+    case 409:
+      return path.includes('/elevation-requests/')
+        ? 'The request is not in a state that allows this transition (it must be PENDING).'
+        : '';
     default:
       return '';
   }
@@ -118,6 +122,14 @@ export class AutoElevateHttp {
 
   async get<T>(path: string, query?: Query): Promise<ApiResult<T>> {
     return this.request<T>('GET', path, query);
+  }
+
+  /**
+   * POST a JSON body. The body is serialised exactly once here; the resulting string is both what
+   * the HMAC `bodyHash` covers and what is sent, so the two can never drift.
+   */
+  async post<T>(path: string, body: unknown): Promise<ApiResult<T>> {
+    return this.request<T>('POST', path, undefined, JSON.stringify(body ?? {}));
   }
 
   private async request<T>(method: string, path: string, query?: Query, body?: string): Promise<ApiResult<T>> {
