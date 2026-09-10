@@ -7,12 +7,30 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-09-10
+
 ### Added
 
 - `AutoElevateWriteClient` with `approveElevationRequest` and `denyElevationRequest` (`requestEdit`
-  scope), client-side payload validation (`AutoElevateValidationError`), and a 409 hint.
+  scope), client-side payload validation (`AutoElevateValidationError`, `validateApprovePayload`,
+  `validateDenyPayload`), and a 409 hint scoped to the elevation-request routes.
 - `post()` on the private transport; the JSON body is serialised once and the same bytes are hashed
   for HMAC and sent.
+- Env-gated live test for the write path that expects `409` against an already-decided request and
+  refuses to run against a `PENDING` one.
+
+### Changed
+
+- Both clients now hold the transport in an ES `#private` field, so the request primitive is
+  unreachable from plain JavaScript as well as from TypeScript. The read client's method set is
+  pinned by an exact inventory test.
+- `denialReason` length is checked in UTF-16 code units (`.length`), matching a JavaScript server
+  validator.
+
+### Verified against the live API
+
+- The node built on this transport approved and denied real requests, created rules, and set an
+  elevation type on 2026-09-10; a second action on a decided request returned `409`.
 
 ## [0.1.1] — 2026-09-08
 
