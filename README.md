@@ -133,7 +133,10 @@ await writer.denyElevationRequest(requestId, { denialReason: 'Not on the approve
 
 Options: `createRule: true` with a `ruleLevel` (`computer`, `location`, `company`, `msp`) also
 creates an auto-approve or auto-deny rule from the request. Payloads are validated before the
-request is sent (`AutoElevateValidationError` names the field), so a malformed call never spends
+request is sent (`AutoElevateValidationError` names the field): `ruleLevel` is required when
+`createRule` is true, `elevationType` must be `admin` or `user`, `durationInMinutes` must be a
+positive whole number, `denialReason` is at most 1000 characters, and the id must be non-empty.
+A malformed call therefore never spends
 a request from the hourly bucket.
 
 ## Pagination and completeness
