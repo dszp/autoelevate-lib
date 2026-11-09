@@ -12,3 +12,7 @@ CLAUDE.md
 *.tgz
 # Planning docs (local only), matching the sibling libs
 docs/
+
+# Claude Code per-user files: they can hold tokens copied from approved commands
+**/.claude/settings.local.json
+**/CLAUDE.local.md
